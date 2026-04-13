@@ -2,6 +2,7 @@ import json
 from datetime import datetime, date
 from pathlib import Path
 from typing import Dict, List, Tuple
+from urllib import error, request
 
 import altair as alt
 import streamlit as st
@@ -16,6 +17,7 @@ st.set_page_config(
 
 
 DATA_FILE = Path(__file__).with_name("budget_data.json")
+SUPABASE_TABLE = "app_state"
 DEFAULT_ALLOWANCE = 150.0
 CATEGORIES = [
     "Restaurant / Food",
@@ -45,27 +47,150 @@ def default_data() -> Dict:
     }
 
 
-def load_data() -> Dict:
+def normalize_data(raw: Dict) -> Dict:
+    baseline = default_data()
+    baseline.update(raw or {})
+    baseline["weekly_allowance"] = float(baseline.get("weekly_allowance", DEFAULT_ALLOWANCE))
+    baseline["remaining_balance"] = float(baseline.get("remaining_balance", baseline["weekly_allowance"]))
+    baseline["transactions"] = list(baseline.get("transactions", []))
+    baseline["weekly_history"] = list(baseline.get("weekly_history", []))
+    return baseline
+
+
+def load_data_local() -> Dict:
     if not DATA_FILE.exists():
         data = default_data()
-        save_data(data)
+        save_data_local(data)
         return data
     try:
         with DATA_FILE.open("r", encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, OSError):
         data = default_data()
-        save_data(data)
+        save_data_local(data)
         return data
 
-    baseline = default_data()
-    baseline.update(data)
-    return baseline
+    return normalize_data(data)
 
 
-def save_data(data: Dict) -> None:
+def save_data_local(data: Dict) -> None:
     with DATA_FILE.open("w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+def get_storage_backend() -> Dict[str, str]:
+    try:
+        supabase_conf = st.secrets.get("supabase", {})
+    except Exception:
+        supabase_conf = {}
+
+    url = str(supabase_conf.get("url", "")).strip()
+    key = str(supabase_conf.get("service_role_key") or supabase_conf.get("anon_key") or "").strip()
+    if url and key:
+        return {"mode": "supabase", "url": url.rstrip("/"), "key": key}
+    return {"mode": "local"}
+
+
+def supabase_request(
+    method: str,
+    endpoint: str,
+    *,
+    key: str,
+    payload: Dict | List | None = None,
+    query: str = "",
+):
+    body = None
+    if payload is not None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+    req = request.Request(
+        f"{endpoint}{query}",
+        data=body,
+        method=method,
+        headers={
+            "apikey": key,
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with request.urlopen(req, timeout=12) as resp:
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw) if raw else {}
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Supabase HTTP {exc.code}: {detail}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"Supabase request failed: {exc.reason}") from exc
+
+
+def load_data_supabase(backend: Dict[str, str]) -> Dict:
+    query = f"?id=eq.default&select=payload"
+    endpoint = f"{backend['url']}/rest/v1/{SUPABASE_TABLE}"
+    rows = supabase_request("GET", endpoint, key=backend["key"], query=query)
+
+    if not rows:
+        data = default_data()
+        save_data_supabase(data, backend)
+        return data
+
+    payload = rows[0].get("payload", {}) if isinstance(rows, list) else {}
+    return normalize_data(payload)
+
+
+def save_data_supabase(data: Dict, backend: Dict[str, str]) -> None:
+    endpoint = f"{backend['url']}/rest/v1/{SUPABASE_TABLE}"
+    payload = [
+        {
+            "id": "default",
+            "payload": data,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+        }
+    ]
+    query = "?on_conflict=id"
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = request.Request(
+        f"{endpoint}{query}",
+        data=body,
+        method="POST",
+        headers={
+            "apikey": backend["key"],
+            "Authorization": f"Bearer {backend['key']}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+    )
+    try:
+        with request.urlopen(req, timeout=12):
+            return
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Supabase HTTP {exc.code}: {detail}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"Supabase request failed: {exc.reason}") from exc
+
+
+def load_data_with_fallback(backend: Dict[str, str]) -> Tuple[Dict, str, str]:
+    if backend["mode"] == "supabase":
+        try:
+            return load_data_supabase(backend), "supabase", ""
+        except Exception as exc:
+            data = load_data_local()
+            return data, "local", str(exc)
+    return load_data_local(), "local", ""
+
+
+def save_data(data: Dict, backend: Dict[str, str]) -> None:
+    if backend["mode"] == "supabase":
+        try:
+            save_data_supabase(data, backend)
+            return
+        except Exception:
+            save_data_local(data)
+            return
+    save_data_local(data)
 
 
 def start_new_week(data: Dict, new_week_id: str) -> None:
@@ -84,11 +209,11 @@ def start_new_week(data: Dict, new_week_id: str) -> None:
     data["transactions"] = []
 
 
-def ensure_week_is_current(data: Dict) -> bool:
+def ensure_week_is_current(data: Dict, backend: Dict[str, str]) -> bool:
     today_week = current_week_id()
     if data.get("current_week_id") != today_week:
         start_new_week(data, today_week)
-        save_data(data)
+        save_data(data, backend)
         return True
     return False
 
@@ -328,8 +453,11 @@ st.markdown(
 )
 
 
-data = load_data()
-if ensure_week_is_current(data):
+storage_backend = get_storage_backend()
+data, active_storage_mode, storage_error = load_data_with_fallback(storage_backend)
+active_backend = storage_backend if active_storage_mode == "supabase" else {"mode": "local"}
+
+if ensure_week_is_current(data, active_backend):
     st.session_state["flash_info"] = "New week detected. Budget has been reset automatically."
 data["weekly_allowance"] = float(data.get("weekly_allowance", DEFAULT_ALLOWANCE))
 data["remaining_balance"] = float(data.get("remaining_balance", data["weekly_allowance"]))
@@ -339,6 +467,13 @@ if "flash_info" in st.session_state:
     st.info(st.session_state.pop("flash_info"))
 if "flash_success" in st.session_state:
     st.success(st.session_state.pop("flash_success"))
+if storage_error:
+    st.warning("Supabase unavailable now. The app is temporarily using local JSON storage.")
+
+if active_storage_mode == "supabase":
+    st.caption("Storage: Supabase cloud database")
+else:
+    st.caption("Storage: Local JSON file")
 
 
 allowance = data["weekly_allowance"]
@@ -383,11 +518,57 @@ with st.expander("Weekly Allowance Settings", expanded=False):
         spent_so_far = old_allowance - float(data["remaining_balance"])
         data["weekly_allowance"] = round(float(new_allowance), 2)
         data["remaining_balance"] = round(data["weekly_allowance"] - spent_so_far, 2)
-        save_data(data)
+        save_data(data, active_backend)
         st.session_state["flash_success"] = (
             f"Weekly allowance updated to {format_money(data['weekly_allowance'])}."
         )
         st.rerun()
+
+with st.expander("Backup & Restore", expanded=False):
+    st.markdown(
+        '<div class="small-muted">Download a full backup anytime, then restore from JSON when needed.</div>',
+        unsafe_allow_html=True,
+    )
+    backup_payload = json.dumps(data, indent=2, ensure_ascii=False)
+    st.download_button(
+        "Download Backup JSON",
+        data=backup_payload,
+        file_name=f"pulse-budget-backup-{date.today().isoformat()}.json",
+        mime="application/json",
+        use_container_width=True,
+    )
+    restore_file = st.file_uploader("Restore from backup file", type=["json"], key="restore_json_file")
+    if restore_file is not None:
+        if st.button("Restore Backup Now", use_container_width=True):
+            try:
+                restored_raw = json.load(restore_file)
+                restored_data = normalize_data(restored_raw)
+                save_data(restored_data, active_backend)
+                st.session_state["flash_success"] = "Backup restored successfully."
+                st.rerun()
+            except Exception:
+                st.error("Invalid backup file. Please upload a valid JSON export.")
+
+with st.expander("Supabase Setup (Optional Cloud Sync)", expanded=False):
+    st.markdown(
+        '<div class="small-muted">If you deploy online, Supabase keeps data persistent across app restarts.</div>',
+        unsafe_allow_html=True,
+    )
+    st.code(
+        """create table if not exists app_state (
+  id text primary key,
+  payload jsonb not null,
+  updated_at timestamptz default now()
+);""",
+        language="sql",
+    )
+    st.code(
+        """# In Streamlit Cloud -> App settings -> Secrets
+[supabase]
+url = "https://YOUR_PROJECT.supabase.co"
+service_role_key = "YOUR_SERVICE_ROLE_KEY" """,
+        language="toml",
+    )
 
 col_a, col_b = st.columns(2, gap="small")
 with col_a:
@@ -450,7 +631,7 @@ if submitted:
         }
         data["transactions"].append(transaction)
         data["remaining_balance"] = round(data["remaining_balance"] - charged, 2)
-        save_data(data)
+        save_data(data, active_backend)
 
         if amortized:
             st.session_state["flash_success"] = (
@@ -469,7 +650,7 @@ with quick_left:
         if data["transactions"]:
             last_tx = data["transactions"].pop()
             data["remaining_balance"] = round(data["remaining_balance"] + float(last_tx["amount_charged"]), 2)
-            save_data(data)
+            save_data(data, active_backend)
             st.session_state["flash_info"] = "Last transaction removed and balance restored."
             st.rerun()
         else:
@@ -478,7 +659,7 @@ with quick_left:
 with quick_right:
     if st.button("Start New Week", use_container_width=True):
         start_new_week(data, current_week_id())
-        save_data(data)
+        save_data(data, active_backend)
         st.session_state["flash_info"] = "Fresh week started. Your balance is reset."
         st.rerun()
 
