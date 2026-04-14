@@ -1,7 +1,7 @@
 """
-Pulse — behavior-driven weekly budget app.
+Pulse — modular, behavior-driven weekly budget dashboard.
 Single-file Streamlit · JSON persistence · i18n · warm wood-tone UI.
-Inline editing · custom categories · minimal language toggle.
+Inline editing · custom categories · user-configurable module layout.
 """
 
 from __future__ import annotations
@@ -29,6 +29,16 @@ DEFAULT_CATS_ZH = [
 DEFAULT_CATS_EN = [
     "Restaurant / Food", "Grocery / Supermarket", "Online Shopping", "Transport",
     "Coffee / Drinks", "Entertainment", "School / Supplies", "Other",
+]
+
+MODULE_IDS = [
+    "hero", "log_expense", "category",
+    "target", "extra_deposit", "target_pace", "history",
+]
+
+DEFAULT_MODULES = [
+    {"id": mid, "enabled": True, "order": i}
+    for i, mid in enumerate(MODULE_IDS)
 ]
 
 # ── i18n ──────────────────────────────────────────────────────────────────
@@ -126,6 +136,17 @@ LANG: dict[str, dict[str, str]] = {
         "edit_amount": "金额",
         "edit_cat": "分类",
         "edit_note": "备注",
+        "settings": "设置",
+        "module_manager": "模块管理",
+        "close_settings": "关闭设置",
+        "mod_hero": "周预算",
+        "mod_log_expense": "快速记账",
+        "mod_category": "分类洞察",
+        "mod_target": "储蓄目标",
+        "mod_extra_deposit": "额外存入",
+        "mod_target_pace": "目标节奏",
+        "mod_history": "最近流水",
+        "language": "语言",
     },
     "en": {
         "brand": "Pulse",
@@ -219,6 +240,17 @@ LANG: dict[str, dict[str, str]] = {
         "edit_amount": "Amount",
         "edit_cat": "Category",
         "edit_note": "Note",
+        "settings": "Settings",
+        "module_manager": "Module Manager",
+        "close_settings": "Close Settings",
+        "mod_hero": "Weekly Budget",
+        "mod_log_expense": "Log Expense",
+        "mod_category": "Category Breakdown",
+        "mod_target": "Savings Target",
+        "mod_extra_deposit": "Extra Deposit",
+        "mod_target_pace": "Target Pace",
+        "mod_history": "Recent Transactions",
+        "language": "Language",
     },
 }
 
@@ -228,7 +260,7 @@ def t(key: str) -> str:
     return LANG.get(lang, LANG["zh"]).get(key, key)
 
 
-# ── Inline edit helpers ───────────────────────────────────────────────────
+# ── State helpers ─────────────────────────────────────────────────────────
 
 def _editing(key: str) -> bool:
     return st.session_state.get(f"_edit_{key}", False)
@@ -238,7 +270,7 @@ def _toggle(key: str) -> None:
     st.session_state[f"_edit_{key}"] = not st.session_state.get(f"_edit_{key}", False)
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+# ── Time helpers ──────────────────────────────────────────────────────────
 
 def current_week_id(today: date | None = None) -> str:
     d = today or date.today()
@@ -275,6 +307,7 @@ def _default_data() -> dict[str, Any]:
         "remaining_balance": DEFAULT_ALLOWANCE,
         "transactions": [],
         "categories": list(DEFAULT_CATS_ZH),
+        "modules": [dict(m) for m in DEFAULT_MODULES],
         "target": _default_target(),
         "extra_deposits": [],
         "weekly_savings_log": [],
@@ -283,19 +316,41 @@ def _default_data() -> dict[str, Any]:
     }
 
 
+def _normalize_modules(raw_mods: list | None) -> list[dict]:
+    if not raw_mods:
+        return [dict(m) for m in DEFAULT_MODULES]
+    existing = {m["id"]: m for m in raw_mods if "id" in m}
+    result = []
+    for i, mid in enumerate(MODULE_IDS):
+        if mid in existing:
+            entry = existing[mid]
+            entry.setdefault("order", i)
+            entry.setdefault("enabled", True)
+            result.append(entry)
+        else:
+            result.append({"id": mid, "enabled": True, "order": i})
+    result.sort(key=lambda x: x["order"])
+    for i, m in enumerate(result):
+        m["order"] = i
+    return result
+
+
 def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
     base = _default_data()
     base.update(raw or {})
     base["lang"] = str(base.get("lang", "zh"))
     base["weekly_allowance"] = float(base.get("weekly_allowance", DEFAULT_ALLOWANCE))
-    base["remaining_balance"] = float(base.get("remaining_balance", base["weekly_allowance"]))
+    base["remaining_balance"] = float(
+        base.get("remaining_balance", base["weekly_allowance"]))
     base["transactions"] = list(base.get("transactions", []))
 
-    if "categories" not in raw or not raw["categories"]:
+    if "categories" not in raw or not raw.get("categories"):
         base["categories"] = list(
             DEFAULT_CATS_ZH if base["lang"] == "zh" else DEFAULT_CATS_EN)
     else:
         base["categories"] = list(base["categories"])
+
+    base["modules"] = _normalize_modules(base.get("modules"))
 
     tgt = base.get("target") or {}
     dt = _default_target()
@@ -413,7 +468,6 @@ def burn_msg(rem: float, allow: float, dl: int) -> str:
 
 
 def tx_category(tx: dict) -> str:
-    """Get display name from transaction (supports legacy category_key and new category field)."""
     if "category" in tx:
         return tx["category"]
     return tx.get("category_key", "Other")
@@ -438,7 +492,18 @@ def pace_status(ratio: float) -> tuple[str, str]:
     return t("behind"), "pace-behind"
 
 
-# ── CSS — Japanese wood-tone + inline edit styling ────────────────────────
+def get_modules(data: dict) -> list[dict]:
+    return sorted(data.get("modules", DEFAULT_MODULES), key=lambda x: x["order"])
+
+
+def is_enabled(data: dict, mid: str) -> bool:
+    for m in data.get("modules", []):
+        if m["id"] == mid:
+            return m.get("enabled", True)
+    return True
+
+
+# ── CSS ───────────────────────────────────────────────────────────────────
 
 st.markdown("""
 <style>
@@ -457,14 +522,7 @@ header[data-testid="stHeader"]{background:transparent!important}
 [data-testid="stToolbar"],#MainMenu,footer{visibility:hidden;height:0;position:fixed}
 .block-container{padding-top:.5rem;padding-bottom:calc(2rem + env(safe-area-inset-bottom));max-width:520px}
 
-.pulse-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:.15rem}
 .pulse-brand{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);font-weight:600}
-.lang-pill{
-  font-size:.7rem;padding:.22rem .55rem;border-radius:999px;
-  border:1px solid rgba(73,58,39,.18);background:rgba(255,253,250,.7);
-  color:var(--muted);cursor:pointer;font-weight:600;text-decoration:none;
-  display:inline-flex;align-items:center;gap:.25rem;
-}
 
 .card{
   background:linear-gradient(180deg,#fffefc,var(--card));
@@ -492,12 +550,7 @@ header[data-testid="stHeader"]{background:transparent!important}
 .metric-label{color:var(--muted);font-size:.86rem;margin-bottom:.2rem;font-weight:500}
 .metric-value{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;color:var(--text)}
 .metric-sub{color:#6f655a;font-size:.82rem;margin-top:.12rem;line-height:1.35}
-.section-title{
-  font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;
-  color:#8a7e72;font-weight:600;margin:1rem 0 .45rem .15rem;
-}
-.section-head{display:flex;justify-content:space-between;align-items:center;margin:1rem 0 .45rem .15rem}
-.section-head-label{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:#8a7e72;font-weight:600}
+.section-title{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:#8a7e72;font-weight:600;margin:1rem 0 .45rem .15rem}
 
 .progress-track{width:100%;height:12px;border-radius:999px;background:rgba(90,70,48,.12);overflow:hidden;margin:.4rem 0 .15rem}
 .progress-fill{height:100%;border-radius:999px;transition:width .35s ease}
@@ -539,10 +592,20 @@ div[data-testid="stNotification"],.stAlert{
 [data-testid="stMarkdownContainer"] table{width:100%;border-collapse:collapse;font-size:.82rem}
 [data-testid="stMarkdownContainer"] th,[data-testid="stMarkdownContainer"] td{border-bottom:1px solid var(--border);padding:.45rem .35rem;text-align:left}
 [data-testid="stMarkdownContainer"] th{color:var(--muted);font-weight:600}
-
 .pace-ahead{color:#3f7650}.pace-ok{color:#8f6b2f}.pace-behind{color:#8a4337}
-.cat-row{display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--border)}
-.cat-name{font-size:.9rem;color:var(--text)}
+
+.settings-card{
+  background:linear-gradient(145deg,#fffaf3,#f8f1e6);
+  border:1px solid rgba(111,84,54,.18);border-radius:22px;
+  padding:1.1rem;margin-bottom:.85rem;
+  box-shadow:0 14px 30px rgba(93,74,51,.12);
+}
+.mod-row{
+  display:flex;align-items:center;gap:.5rem;padding:.45rem 0;
+  border-bottom:1px solid rgba(73,58,39,.08);font-size:.9rem;
+}
+.mod-row:last-child{border-bottom:none}
+.mod-name{flex:1;font-weight:500}
 
 @media(max-width:640px){
   .block-container{padding-left:.7rem;padding-right:.7rem}
@@ -552,19 +615,22 @@ div[data-testid="stNotification"],.stAlert{
 </style>
 """, unsafe_allow_html=True)
 
-# ── Load data & init ──────────────────────────────────────────────────────
+# ── Load & init ───────────────────────────────────────────────────────────
 
 data = load_data()
-
 if "lang" not in st.session_state:
     st.session_state["lang"] = data.get("lang", "zh")
 
-# ── Top bar: brand + language pill ────────────────────────────────────────
+# ── Top bar: ⚙️ · brand · language ───────────────────────────────────────
 
-_top_l, _top_r = st.columns([6, 1])
-with _top_l:
+_t1, _t2, _t3 = st.columns([1, 6, 1])
+with _t1:
+    if st.button("⚙️", key="_settings_btn", use_container_width=True):
+        _toggle("settings")
+        st.rerun()
+with _t2:
     st.markdown('<div class="pulse-brand">Pulse</div>', unsafe_allow_html=True)
-with _top_r:
+with _t3:
     cur_lang = st.session_state["lang"]
     pill = "EN" if cur_lang == "zh" else "中文"
     if st.button(pill, key="_lang", use_container_width=True):
@@ -574,18 +640,72 @@ with _top_r:
         save_data(data)
         st.rerun()
 
+# ── Settings panel (inline, toggleable) ──────────────────────────────────
+
+if _editing("settings"):
+    st.markdown(f"""
+    <div class="settings-card">
+      <div style="font-size:.92rem;font-weight:700;margin-bottom:.6rem">{t("module_manager")}</div>
+    </div>""", unsafe_allow_html=True)
+
+    mods = get_modules(data)
+    changed = False
+
+    for i, m in enumerate(mods):
+        mid = m["id"]
+        label = t(f"mod_{mid}")
+        c_chk, c_name, c_up, c_dn = st.columns([1, 5, 1, 1])
+        with c_chk:
+            new_en = st.checkbox("", value=m["enabled"],
+                                 key=f"mod_en_{mid}", label_visibility="collapsed")
+            if new_en != m["enabled"]:
+                m["enabled"] = new_en
+                changed = True
+        with c_name:
+            st.markdown(
+                f'<div style="padding:.35rem 0;font-size:.9rem;font-weight:500">{label}</div>',
+                unsafe_allow_html=True)
+        with c_up:
+            if i > 0:
+                if st.button("↑", key=f"mod_up_{mid}", use_container_width=True):
+                    mods[i - 1]["order"], mods[i]["order"] = (
+                        mods[i]["order"], mods[i - 1]["order"])
+                    data["modules"] = sorted(mods, key=lambda x: x["order"])
+                    save_data(data)
+                    st.rerun()
+        with c_dn:
+            if i < len(mods) - 1:
+                if st.button("↓", key=f"mod_dn_{mid}", use_container_width=True):
+                    mods[i + 1]["order"], mods[i]["order"] = (
+                        mods[i]["order"], mods[i + 1]["order"])
+                    data["modules"] = sorted(mods, key=lambda x: x["order"])
+                    save_data(data)
+                    st.rerun()
+
+    if changed:
+        data["modules"] = mods
+        save_data(data)
+        st.rerun()
+
+    if st.button(t("close_settings"), key="close_settings", use_container_width=True):
+        _toggle("settings")
+        st.rerun()
+
+# ── Auto-week & flash ────────────────────────────────────────────────────
+
 if ensure_week_current(data):
     st.session_state["flash_info"] = t("auto_week")
 
 data["weekly_allowance"] = float(data.get("weekly_allowance", DEFAULT_ALLOWANCE))
-data["remaining_balance"] = float(data.get("remaining_balance", data["weekly_allowance"]))
+data["remaining_balance"] = float(
+    data.get("remaining_balance", data["weekly_allowance"]))
 
 if "flash_info" in st.session_state:
     st.info(st.session_state.pop("flash_info"))
 if "flash_success" in st.session_state:
     st.success(st.session_state.pop("flash_success"))
 
-# ── Computed ──────────────────────────────────────────────────────────────
+# ── Computed values ───────────────────────────────────────────────────────
 
 allow = data["weekly_allowance"]
 rem = data["remaining_balance"]
@@ -618,210 +738,186 @@ if data["weekly_savings_log"]:
 
 cats = data.get("categories", list(DEFAULT_CATS_ZH))
 
+
 # ══════════════════════════════════════════════════════════════════════════
-# HERO — with inline allowance editing
+# Module render functions
 # ══════════════════════════════════════════════════════════════════════════
 
-if _editing("allowance"):
-    st.markdown(f"""
-    <div class="card hero-card">
-      <div class="hero-label">{t("weekly_allowance")}</div>
-    </div>""", unsafe_allow_html=True)
-    new_a = st.number_input(t("weekly_allowance"), min_value=1.0,
-                            value=float(data["weekly_allowance"]),
-                            step=5.0, format="%.2f",
-                            key="edit_allow_val", label_visibility="collapsed")
-    sa, sc = st.columns(2, gap="small")
-    with sa:
-        if st.button(t("save"), key="save_allow", use_container_width=True):
-            old_a = float(data["weekly_allowance"])
-            spent_so = round(old_a - float(data["remaining_balance"]), 2)
-            data["weekly_allowance"] = round(float(new_a), 2)
-            data["remaining_balance"] = round(data["weekly_allowance"] - spent_so, 2)
-            save_data(data)
-            _toggle("allowance")
-            st.session_state["flash_success"] = t("allowance_saved").format(
-                v=fmt(data["weekly_allowance"]))
-            st.rerun()
-    with sc:
-        if st.button(t("cancel"), key="cancel_allow", use_container_width=True):
-            _toggle("allowance")
-            st.rerun()
-else:
-    _hero_l, _hero_r = st.columns([20, 1])
-    with _hero_l:
+def render_hero():
+    if _editing("allowance"):
+        st.markdown(f'<div class="card hero-card"><div class="hero-label">{t("weekly_allowance")}</div></div>', unsafe_allow_html=True)
+        new_a = st.number_input(t("weekly_allowance"), min_value=1.0,
+                                value=float(data["weekly_allowance"]),
+                                step=5.0, format="%.2f",
+                                key="edit_allow_val", label_visibility="collapsed")
+        sa, sc = st.columns(2, gap="small")
+        with sa:
+            if st.button(t("save"), key="save_allow", use_container_width=True):
+                old_a = float(data["weekly_allowance"])
+                spent_so = round(old_a - float(data["remaining_balance"]), 2)
+                data["weekly_allowance"] = round(float(new_a), 2)
+                data["remaining_balance"] = round(data["weekly_allowance"] - spent_so, 2)
+                save_data(data)
+                _toggle("allowance")
+                st.session_state["flash_success"] = t("allowance_saved").format(
+                    v=fmt(data["weekly_allowance"]))
+                st.rerun()
+        with sc:
+            if st.button(t("cancel"), key="cancel_allow", use_container_width=True):
+                _toggle("allowance")
+                st.rerun()
+    else:
+        _hl, _hr = st.columns([20, 1])
+        with _hl:
+            st.markdown(f"""
+            <div class="card hero-card">
+              <div class="hero-label">{t("remaining_week")}</div>
+              <div class="hero-amount">{fmt(rem)}</div>
+              <span class="state-pill {st_class}">{st_label}</span>
+              <div class="metric-sub" style="margin-top:.5rem">{t("weekly_allowance")}: {fmt(allow)}</div>
+            </div>""", unsafe_allow_html=True)
+        with _hr:
+            if st.button("✏️", key="edit_allow_btn", use_container_width=True):
+                _toggle("allowance")
+                st.rerun()
+
+    cA, cB = st.columns(2, gap="small")
+    with cA:
         st.markdown(f"""
-        <div class="card hero-card">
-          <div class="hero-label">{t("remaining_week")}</div>
-          <div class="hero-amount">{fmt(rem)}</div>
-          <span class="state-pill {st_class}">{st_label}</span>
-          <div class="metric-sub" style="margin-top:.5rem">{t("weekly_allowance")}: {fmt(allow)}</div>
+        <div class="card">
+          <div class="metric-label">{t("safe_today")}</div>
+          <div class="metric-value">{fmt(safe)}</div>
+          <div class="metric-sub">{dl} {t("days_left")} · {t("remaining_div_days")}</div>
         </div>""", unsafe_allow_html=True)
-    with _hero_r:
-        if st.button("✏️", key="edit_allow_btn", use_container_width=True):
-            _toggle("allowance")
-            st.rerun()
+    with cB:
+        st.markdown(f"""
+        <div class="card">
+          <div class="metric-label">{t("burn_rate")}</div>
+          <div class="metric-value" style="font-size:1.05rem;line-height:1.25">{burn}</div>
+          <div class="metric-sub">{t("burn_vs_ideal")}</div>
+        </div>""", unsafe_allow_html=True)
 
-cA, cB = st.columns(2, gap="small")
-with cA:
     st.markdown(f"""
     <div class="card">
-      <div class="metric-label">{t("safe_today")}</div>
-      <div class="metric-value">{fmt(safe)}</div>
-      <div class="metric-sub">{dl} {t("days_left")} · {t("remaining_div_days")}</div>
-    </div>""", unsafe_allow_html=True)
-with cB:
-    st.markdown(f"""
-    <div class="card">
-      <div class="metric-label">{t("burn_rate")}</div>
-      <div class="metric-value" style="font-size:1.05rem;line-height:1.25">{burn}</div>
-      <div class="metric-sub">{t("burn_vs_ideal")}</div>
+      <div class="metric-label">{t("budget_progress")}</div>
+      <div class="progress-track"><div class="progress-fill" style="width:{prog_pct:.1f}%;background:{prog_color}"></div></div>
+      <div class="metric-sub">{prog_pct:.0f}% {t("pct_left")}</div>
     </div>""", unsafe_allow_html=True)
 
-st.markdown(f"""
-<div class="card">
-  <div class="metric-label">{t("budget_progress")}</div>
-  <div class="progress-track"><div class="progress-fill" style="width:{prog_pct:.1f}%;background:{prog_color}"></div></div>
-  <div class="metric-sub">{prog_pct:.0f}% {t("pct_left")}</div>
-</div>""", unsafe_allow_html=True)
+    if rem < 0:
+        st.error(f"{t('panic_over')} {fmt(abs(rem))}")
 
-if rem < 0:
-    st.error(f"{t('panic_over')} {fmt(abs(rem))}")
 
-# ══════════════════════════════════════════════════════════════════════════
-# Log Expense + Category Manager
-# ══════════════════════════════════════════════════════════════════════════
-
-_log_l, _log_r = st.columns([20, 1])
-with _log_l:
-    st.markdown(f'<div id="log" class="section-title">{t("log_expense")}</div>',
-                unsafe_allow_html=True)
-with _log_r:
-    if st.button("⚙️", key="manage_cats_btn", use_container_width=True):
-        _toggle("cats")
-        st.rerun()
-
-if _editing("cats"):
-    st.markdown(f'<div class="card">', unsafe_allow_html=True)
-    st.markdown(f'<div class="metric-label">{t("manage_cats")}</div>',
-                unsafe_allow_html=True)
-    st.markdown('</div>', unsafe_allow_html=True)
-
-    for i, c in enumerate(cats):
-        cl, cr = st.columns([6, 1])
-        with cl:
-            st.markdown(f'<div style="padding:.35rem 0;font-size:.9rem">{c}</div>',
-                        unsafe_allow_html=True)
-        with cr:
-            if st.button("✕", key=f"del_cat_{i}", use_container_width=True):
-                removed = cats.pop(i)
-                data["categories"] = cats
-                save_data(data)
-                st.session_state["flash_info"] = t("cat_deleted").format(c=removed)
-                st.rerun()
-
-    nc_l, nc_r = st.columns([4, 1])
-    with nc_l:
-        new_cat = st.text_input(t("add_category"), key="new_cat_input",
-                                label_visibility="collapsed",
-                                placeholder=t("add_category"))
-    with nc_r:
-        if st.button(t("add"), key="add_cat_btn", use_container_width=True):
-            nc = new_cat.strip()
-            if not nc:
-                st.warning(t("cat_empty"))
-            elif nc in cats:
-                st.warning(t("cat_exists"))
-            else:
-                cats.append(nc)
-                data["categories"] = cats
-                save_data(data)
-                st.session_state["flash_success"] = t("cat_added").format(c=nc)
-                st.rerun()
-
-    if st.button(t("done"), key="done_cats", use_container_width=True):
-        _toggle("cats")
-        st.rerun()
-else:
-    with st.form("expense_form", clear_on_submit=True):
-        amt = st.number_input(t("amount"), min_value=0.0, step=1.0, format="%.2f")
-        cat_label = st.selectbox(t("category"), cats)
-        note = st.text_input(t("note"))
-        amor = st.checkbox(t("amortize"))
-        submitted = st.form_submit_button(t("add_btn"), use_container_width=True)
-
-    if submitted:
-        if amt <= 0:
-            st.warning(t("enter_positive"))
-        else:
-            charged = round(amt * 0.5, 2) if amor else round(amt, 2)
-            tx = {
-                "timestamp": datetime.now().isoformat(timespec="seconds"),
-                "amount_entered": round(float(amt), 2),
-                "amount_charged": charged,
-                "category": cat_label,
-                "note": note.strip(),
-                "amortized": bool(amor),
-            }
-            data["transactions"].append(tx)
-            data["remaining_balance"] = round(data["remaining_balance"] - charged, 2)
-            save_data(data)
-            if amor:
-                st.session_state["flash_success"] = t("amortize_msg")
-            else:
-                st.session_state["flash_success"] = t("logged").format(
-                    v=fmt(charged), c=cat_label)
+def render_log_expense():
+    _ll, _lr = st.columns([20, 1])
+    with _ll:
+        st.markdown(f'<div id="log" class="section-title">{t("log_expense")}</div>', unsafe_allow_html=True)
+    with _lr:
+        if st.button("⚙️", key="manage_cats_btn", use_container_width=True):
+            _toggle("cats")
             st.rerun()
 
-    u1, u2 = st.columns(2, gap="small")
-    with u1:
-        if st.button(t("undo"), use_container_width=True):
-            if data["transactions"]:
-                ltx = data["transactions"].pop()
-                data["remaining_balance"] = round(
-                    data["remaining_balance"] + float(ltx["amount_charged"]), 2)
-                save_data(data)
-                st.session_state["flash_info"] = t("undo_done")
-                st.rerun()
-            else:
-                st.warning(t("no_undo"))
-    with u2:
-        if st.button(t("new_week"), use_container_width=True):
-            start_new_week(data, current_week_id())
-            save_data(data)
-            st.session_state["flash_info"] = t("new_week_done")
+    if _editing("cats"):
+        st.markdown(f'<div class="card"><div class="metric-label">{t("manage_cats")}</div></div>', unsafe_allow_html=True)
+        for i, c in enumerate(cats):
+            cl, cr = st.columns([6, 1])
+            with cl:
+                st.markdown(f'<div style="padding:.35rem 0;font-size:.9rem">{c}</div>', unsafe_allow_html=True)
+            with cr:
+                if st.button("✕", key=f"del_cat_{i}", use_container_width=True):
+                    removed = cats.pop(i)
+                    data["categories"] = cats
+                    save_data(data)
+                    st.session_state["flash_info"] = t("cat_deleted").format(c=removed)
+                    st.rerun()
+        nc_l, nc_r = st.columns([4, 1])
+        with nc_l:
+            new_cat = st.text_input(t("add_category"), key="new_cat_input",
+                                    label_visibility="collapsed", placeholder=t("add_category"))
+        with nc_r:
+            if st.button(t("add"), key="add_cat_btn", use_container_width=True):
+                nc = new_cat.strip()
+                if not nc:
+                    st.warning(t("cat_empty"))
+                elif nc in cats:
+                    st.warning(t("cat_exists"))
+                else:
+                    cats.append(nc)
+                    data["categories"] = cats
+                    save_data(data)
+                    st.session_state["flash_success"] = t("cat_added").format(c=nc)
+                    st.rerun()
+        if st.button(t("done"), key="done_cats", use_container_width=True):
+            _toggle("cats")
             st.rerun()
+    else:
+        with st.form("expense_form", clear_on_submit=True):
+            amt = st.number_input(t("amount"), min_value=0.0, step=1.0, format="%.2f")
+            cat_label = st.selectbox(t("category"), cats)
+            note = st.text_input(t("note"))
+            amor = st.checkbox(t("amortize"))
+            submitted = st.form_submit_button(t("add_btn"), use_container_width=True)
+        if submitted:
+            if amt <= 0:
+                st.warning(t("enter_positive"))
+            else:
+                charged = round(amt * 0.5, 2) if amor else round(amt, 2)
+                tx = {
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "amount_entered": round(float(amt), 2),
+                    "amount_charged": charged,
+                    "category": cat_label,
+                    "note": note.strip(),
+                    "amortized": bool(amor),
+                }
+                data["transactions"].append(tx)
+                data["remaining_balance"] = round(data["remaining_balance"] - charged, 2)
+                save_data(data)
+                if amor:
+                    st.session_state["flash_success"] = t("amortize_msg")
+                else:
+                    st.session_state["flash_success"] = t("logged").format(v=fmt(charged), c=cat_label)
+                st.rerun()
 
-# ══════════════════════════════════════════════════════════════════════════
-# Category Insights
-# ══════════════════════════════════════════════════════════════════════════
+        u1, u2 = st.columns(2, gap="small")
+        with u1:
+            if st.button(t("undo"), use_container_width=True):
+                if data["transactions"]:
+                    ltx = data["transactions"].pop()
+                    data["remaining_balance"] = round(
+                        data["remaining_balance"] + float(ltx["amount_charged"]), 2)
+                    save_data(data)
+                    st.session_state["flash_info"] = t("undo_done")
+                    st.rerun()
+                else:
+                    st.warning(t("no_undo"))
+        with u2:
+            if st.button(t("new_week"), use_container_width=True):
+                start_new_week(data, current_week_id())
+                save_data(data)
+                st.session_state["flash_info"] = t("new_week_done")
+                st.rerun()
 
-summary, total_spent = cat_summary(data["transactions"])
-st.markdown(f'<div class="section-title">{t("category_insights")}</div>',
-            unsafe_allow_html=True)
 
-if total_spent <= 0:
-    st.markdown(
-        f'<div class="card"><div class="metric-sub">{t("no_spending")}</div></div>',
-        unsafe_allow_html=True)
-else:
+def render_category():
+    summary, total_spent = cat_summary(data["transactions"])
+    st.markdown(f'<div class="section-title">{t("category_insights")}</div>', unsafe_allow_html=True)
+    if total_spent <= 0:
+        st.markdown(f'<div class="card"><div class="metric-sub">{t("no_spending")}</div></div>', unsafe_allow_html=True)
+        return
+
     sorted_cats = sorted(summary.items(), key=lambda x: x[1], reverse=True)
-    chart_rows = [{"category": c, "spent": v, "pct": (v / total_spent) * 100}
-                  for c, v in sorted_cats]
-
-    palette = ["#b1885b", "#c5a171", "#9d7e59", "#d1b28a",
-               "#a58b69", "#b79b79", "#8f7355", "#c8b18f"]
+    chart_rows = [{"category": c, "spent": v, "pct": (v / total_spent) * 100} for c, v in sorted_cats]
+    palette = ["#b1885b", "#c5a171", "#9d7e59", "#d1b28a", "#a58b69", "#b79b79", "#8f7355", "#c8b18f"]
 
     donut = (
         alt.Chart(alt.Data(values=chart_rows))
         .mark_arc(innerRadius=58, outerRadius=92, cornerRadius=4)
         .encode(
             theta=alt.Theta("spent:Q", stack=True),
-            color=alt.Color("category:N",
-                            scale=alt.Scale(range=palette),
+            color=alt.Color("category:N", scale=alt.Scale(range=palette),
                             legend=alt.Legend(orient="bottom", columns=2,
-                                             labelColor="#5f5347",
-                                             symbolType="circle", title=None)),
+                                             labelColor="#5f5347", symbolType="circle", title=None)),
             tooltip=[alt.Tooltip("category:N", title=t("category")),
                      alt.Tooltip("spent:Q", title="$", format=",.2f"),
                      alt.Tooltip("pct:Q", title="%", format=".1f")],
@@ -851,235 +947,193 @@ else:
       <div class="metric-sub">{t("top_spend_sub").format(c=top_c)}</div>
     </div>""", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════
-# Target — inline editing
-# ══════════════════════════════════════════════════════════════════════════
 
-if _editing("target"):
-    st.markdown(f'<div class="section-title">{t("target_section")}</div>',
-                unsafe_allow_html=True)
-    tn = st.text_input(t("target_name"), value=str(tgt["name"]), key="ed_tgt_n")
-    tc1, tc2 = st.columns(2)
-    with tc1:
-        tt = st.number_input(t("target_total"), min_value=1.0,
-                             value=float(tgt["total"]), step=50.0, key="ed_tgt_t")
-    with tc2:
-        tm = st.number_input(t("monthly_goal"), min_value=0.0,
-                             value=float(tgt["monthly_goal"]), step=25.0, key="ed_tgt_m")
-    sa, sc = st.columns(2, gap="small")
-    with sa:
-        if st.button(t("save"), key="save_tgt", use_container_width=True):
-            data["target"]["name"] = tn.strip() or "My Goal"
-            data["target"]["total"] = round(float(tt), 2)
-            data["target"]["monthly_goal"] = round(float(tm), 2)
-            save_data(data)
-            _toggle("target")
-            st.session_state["flash_success"] = t("target_saved_msg")
-            st.rerun()
-    with sc:
-        if st.button(t("cancel"), key="cancel_tgt", use_container_width=True):
-            _toggle("target")
-            st.rerun()
-else:
-    _tgt_l, _tgt_r = st.columns([20, 1])
-    with _tgt_l:
-        st.markdown(f'<div class="section-title">{t("target_section")}</div>',
-                    unsafe_allow_html=True)
-    with _tgt_r:
-        if st.button("✏️", key="edit_tgt_btn", use_container_width=True):
-            _toggle("target")
-            st.rerun()
-
-    st.markdown(f"""
-    <div class="card">
-      <div class="metric-label">🎯 {tgt["name"]}</div>
-      <div class="metric-value" style="font-size:1.65rem">{fmt(tgt_saved)} / {fmt(tgt_total)}</div>
-      <div class="metric-sub">{tgt_pct:.1f}% {t("completed")}</div>
-      <div class="progress-track" style="margin-top:.55rem">
-        <div class="progress-fill" style="width:{tgt_pct:.1f}%;background:linear-gradient(90deg,#b78b5a,#8f6b44)"></div>
-      </div>
-    </div>""", unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div class="card">
-      <div class="metric-sub" style="margin-bottom:.35rem">{t("breakdown_auto")}: <strong>{fmt(tgt_auto)}</strong></div>
-      <div class="metric-sub">{t("breakdown_extra")}: <strong>{fmt(tgt_extra)}</strong></div>
-      <div class="metric-sub" style="margin-top:.35rem;font-size:.88rem"><strong>{t("breakdown_total")}: {fmt(tgt_saved)}</strong></div>
-    </div>""", unsafe_allow_html=True)
-
-# Weekly contribution
-cw1, cw2 = st.columns(2)
-with cw1:
-    st.markdown(f"""
-    <div class="card">
-      <div class="metric-label">{t("projected_save")}</div>
-      <div class="metric-value" style="font-size:1.2rem">{fmt(proj_save)}</div>
-      <div class="metric-sub">{t("formula_save")}</div>
-    </div>""", unsafe_allow_html=True)
-with cw2:
-    st.markdown(f"""
-    <div class="card">
-      <div class="metric-label">{t("last_week_credit")}</div>
-      <div class="metric-value" style="font-size:1.2rem">{fmt(last_wk_save)}</div>
-      <div class="metric-sub">{t("auto_credit")}</div>
-    </div>""", unsafe_allow_html=True)
-
-rows_md = []
-for row in data.get("weekly_savings_log", [])[-6:]:
-    rows_md.append(
-        f"| {row.get('week_id','')} | {fmt(float(row.get('budget',0)))} | "
-        f"{fmt(float(row.get('spent',0)))} | {fmt(float(row.get('saved',0)))} |")
-if rows_md:
-    st.markdown(
-        f"| {t('week_col')} | {t('budget_col')} | {t('spent_col')} | {t('saved_col')} |\n"
-        "| --- | --- | --- | --- |\n" + "\n".join(rows_md))
-
-# ══════════════════════════════════════════════════════════════════════════
-# Extra Deposit
-# ══════════════════════════════════════════════════════════════════════════
-
-st.markdown(f'<div class="section-title">{t("extra_deposit")}</div>',
-            unsafe_allow_html=True)
-st.markdown(
-    f'<div class="metric-sub" style="margin-bottom:.5rem">{t("extra_deposit_desc")}</div>',
-    unsafe_allow_html=True)
-
-with st.form("deposit_form", clear_on_submit=True):
-    dep_amt = st.number_input(t("amount"), min_value=0.0, step=10.0,
-                              format="%.2f", key="dep_amt")
-    dep_note = st.text_input(t("extra_note"), key="dep_note")
-    dep_sub = st.form_submit_button(t("add_deposit"), use_container_width=True)
-
-if dep_sub:
-    if dep_amt <= 0:
-        st.warning(t("enter_positive"))
+def render_target():
+    if _editing("target"):
+        st.markdown(f'<div class="section-title">{t("target_section")}</div>', unsafe_allow_html=True)
+        tn = st.text_input(t("target_name"), value=str(tgt["name"]), key="ed_tgt_n")
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            tt = st.number_input(t("target_total"), min_value=1.0, value=float(tgt["total"]), step=50.0, key="ed_tgt_t")
+        with tc2:
+            tm = st.number_input(t("monthly_goal"), min_value=0.0, value=float(tgt["monthly_goal"]), step=25.0, key="ed_tgt_m")
+        sa, sc = st.columns(2, gap="small")
+        with sa:
+            if st.button(t("save"), key="save_tgt", use_container_width=True):
+                data["target"]["name"] = tn.strip() or "My Goal"
+                data["target"]["total"] = round(float(tt), 2)
+                data["target"]["monthly_goal"] = round(float(tm), 2)
+                save_data(data)
+                _toggle("target")
+                st.session_state["flash_success"] = t("target_saved_msg")
+                st.rerun()
+        with sc:
+            if st.button(t("cancel"), key="cancel_tgt", use_container_width=True):
+                _toggle("target")
+                st.rerun()
     else:
-        dep_val = round(float(dep_amt), 2)
-        data["target"]["extra_total"] = round(tgt_extra + dep_val, 2)
-        data["extra_deposits"].append({
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "amount": dep_val, "note": dep_note.strip(),
-        })
-        data["extra_deposits"] = data["extra_deposits"][-50:]
-        data["monthly_extra_deposits"][mk] = round(m_extra + dep_val, 2)
-        save_data(data)
-        st.session_state["flash_success"] = t("deposit_done").format(v=fmt(dep_val))
-        st.rerun()
+        _tl, _tr = st.columns([20, 1])
+        with _tl:
+            st.markdown(f'<div class="section-title">{t("target_section")}</div>', unsafe_allow_html=True)
+        with _tr:
+            if st.button("✏️", key="edit_tgt_btn", use_container_width=True):
+                _toggle("target")
+                st.rerun()
 
-# ══════════════════════════════════════════════════════════════════════════
-# Target Pace — inline monthly goal editing
-# ══════════════════════════════════════════════════════════════════════════
+        st.markdown(f"""
+        <div class="card">
+          <div class="metric-label">🎯 {tgt["name"]}</div>
+          <div class="metric-value" style="font-size:1.65rem">{fmt(tgt_saved)} / {fmt(tgt_total)}</div>
+          <div class="metric-sub">{tgt_pct:.1f}% {t("completed")}</div>
+          <div class="progress-track" style="margin-top:.55rem">
+            <div class="progress-fill" style="width:{tgt_pct:.1f}%;background:linear-gradient(90deg,#b78b5a,#8f6b44)"></div>
+          </div>
+        </div>""", unsafe_allow_html=True)
 
-if _editing("pace"):
-    st.markdown(f'<div class="section-title">{t("target_pace")}</div>',
-                unsafe_allow_html=True)
-    new_mg = st.number_input(t("monthly_goal"), min_value=0.0,
-                             value=float(tgt["monthly_goal"]),
-                             step=25.0, key="ed_pace_mg")
-    sa, sc = st.columns(2, gap="small")
-    with sa:
-        if st.button(t("save"), key="save_pace", use_container_width=True):
-            data["target"]["monthly_goal"] = round(float(new_mg), 2)
+        st.markdown(f"""
+        <div class="card">
+          <div class="metric-sub" style="margin-bottom:.35rem">{t("breakdown_auto")}: <strong>{fmt(tgt_auto)}</strong></div>
+          <div class="metric-sub">{t("breakdown_extra")}: <strong>{fmt(tgt_extra)}</strong></div>
+          <div class="metric-sub" style="margin-top:.35rem;font-size:.88rem"><strong>{t("breakdown_total")}: {fmt(tgt_saved)}</strong></div>
+        </div>""", unsafe_allow_html=True)
+
+    cw1, cw2 = st.columns(2)
+    with cw1:
+        st.markdown(f"""
+        <div class="card">
+          <div class="metric-label">{t("projected_save")}</div>
+          <div class="metric-value" style="font-size:1.2rem">{fmt(proj_save)}</div>
+          <div class="metric-sub">{t("formula_save")}</div>
+        </div>""", unsafe_allow_html=True)
+    with cw2:
+        st.markdown(f"""
+        <div class="card">
+          <div class="metric-label">{t("last_week_credit")}</div>
+          <div class="metric-value" style="font-size:1.2rem">{fmt(last_wk_save)}</div>
+          <div class="metric-sub">{t("auto_credit")}</div>
+        </div>""", unsafe_allow_html=True)
+
+    rows_md = []
+    for row in data.get("weekly_savings_log", [])[-6:]:
+        rows_md.append(
+            f"| {row.get('week_id','')} | {fmt(float(row.get('budget',0)))} | "
+            f"{fmt(float(row.get('spent',0)))} | {fmt(float(row.get('saved',0)))} |")
+    if rows_md:
+        st.markdown(
+            f"| {t('week_col')} | {t('budget_col')} | {t('spent_col')} | {t('saved_col')} |\n"
+            "| --- | --- | --- | --- |\n" + "\n".join(rows_md))
+
+
+def render_extra_deposit():
+    st.markdown(f'<div class="section-title">{t("extra_deposit")}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-sub" style="margin-bottom:.5rem">{t("extra_deposit_desc")}</div>', unsafe_allow_html=True)
+
+    with st.form("deposit_form", clear_on_submit=True):
+        dep_amt = st.number_input(t("amount"), min_value=0.0, step=10.0, format="%.2f", key="dep_amt")
+        dep_note = st.text_input(t("extra_note"), key="dep_note")
+        dep_sub = st.form_submit_button(t("add_deposit"), use_container_width=True)
+
+    if dep_sub:
+        if dep_amt <= 0:
+            st.warning(t("enter_positive"))
+        else:
+            dep_val = round(float(dep_amt), 2)
+            data["target"]["extra_total"] = round(tgt_extra + dep_val, 2)
+            data["extra_deposits"].append({
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "amount": dep_val, "note": dep_note.strip(),
+            })
+            data["extra_deposits"] = data["extra_deposits"][-50:]
+            data["monthly_extra_deposits"][mk] = round(m_extra + dep_val, 2)
             save_data(data)
-            _toggle("pace")
-            st.session_state["flash_success"] = t("pace_saved")
-            st.rerun()
-    with sc:
-        if st.button(t("cancel"), key="cancel_pace", use_container_width=True):
-            _toggle("pace")
-            st.rerun()
-else:
-    _pc_l, _pc_r = st.columns([20, 1])
-    with _pc_l:
-        st.markdown(f'<div class="section-title">{t("target_pace")}</div>',
-                    unsafe_allow_html=True)
-    with _pc_r:
-        if st.button("✏️", key="edit_pace_btn", use_container_width=True):
-            _toggle("pace")
+            st.session_state["flash_success"] = t("deposit_done").format(v=fmt(dep_val))
             st.rerun()
 
-    st.markdown(f"""
-    <div class="card">
-      <div class="metric-label">{t("monthly_goal_label")}</div>
-      <div class="metric-value">{fmt(m_goal)}</div>
-      <div class="metric-sub" style="margin-top:.6rem">{t("month_auto")}: <strong>{fmt(m_auto)}</strong></div>
-      <div class="metric-sub">{t("month_extra")}: <strong>{fmt(m_extra)}</strong></div>
-      <div class="metric-sub">{t("month_total")}: <strong>{fmt(m_total)}</strong></div>
-      <div class="metric-sub" style="margin-top:.3rem">{t("pace_ratio_label")}: <strong>{pace_r:.2f}</strong></div>
-      <div class="metric-sub"><span class="{pace_cls}"><strong>{pace_lbl}</strong></span></div>
-      <div class="metric-sub" style="margin-top:.45rem">{t("pace_tip").format(n=tgt["name"])}</div>
-    </div>""", unsafe_allow_html=True)
 
-# ══════════════════════════════════════════════════════════════════════════
-# History — with per-item edit & delete
-# ══════════════════════════════════════════════════════════════════════════
+def render_target_pace():
+    if _editing("pace"):
+        st.markdown(f'<div class="section-title">{t("target_pace")}</div>', unsafe_allow_html=True)
+        new_mg = st.number_input(t("monthly_goal"), min_value=0.0,
+                                 value=float(tgt["monthly_goal"]), step=25.0, key="ed_pace_mg")
+        sa, sc = st.columns(2, gap="small")
+        with sa:
+            if st.button(t("save"), key="save_pace", use_container_width=True):
+                data["target"]["monthly_goal"] = round(float(new_mg), 2)
+                save_data(data)
+                _toggle("pace")
+                st.session_state["flash_success"] = t("pace_saved")
+                st.rerun()
+        with sc:
+            if st.button(t("cancel"), key="cancel_pace", use_container_width=True):
+                _toggle("pace")
+                st.rerun()
+    else:
+        _pl, _pr = st.columns([20, 1])
+        with _pl:
+            st.markdown(f'<div class="section-title">{t("target_pace")}</div>', unsafe_allow_html=True)
+        with _pr:
+            if st.button("✏️", key="edit_pace_btn", use_container_width=True):
+                _toggle("pace")
+                st.rerun()
 
-st.markdown(f'<div class="section-title">{t("history")}</div>',
-            unsafe_allow_html=True)
+        st.markdown(f"""
+        <div class="card">
+          <div class="metric-label">{t("monthly_goal_label")}</div>
+          <div class="metric-value">{fmt(m_goal)}</div>
+          <div class="metric-sub" style="margin-top:.6rem">{t("month_auto")}: <strong>{fmt(m_auto)}</strong></div>
+          <div class="metric-sub">{t("month_extra")}: <strong>{fmt(m_extra)}</strong></div>
+          <div class="metric-sub">{t("month_total")}: <strong>{fmt(m_total)}</strong></div>
+          <div class="metric-sub" style="margin-top:.3rem">{t("pace_ratio_label")}: <strong>{pace_r:.2f}</strong></div>
+          <div class="metric-sub"><span class="{pace_cls}"><strong>{pace_lbl}</strong></span></div>
+          <div class="metric-sub" style="margin-top:.45rem">{t("pace_tip").format(n=tgt["name"])}</div>
+        </div>""", unsafe_allow_html=True)
 
-tx_list = data["transactions"]
-num_tx = len(tx_list)
-show_indices = list(range(max(0, num_tx - 5), num_tx))[::-1]
 
-if not show_indices:
-    st.markdown(
-        f'<div class="card"><div class="metric-sub">{t("no_tx")}</div></div>',
-        unsafe_allow_html=True)
-else:
+def render_history():
+    st.markdown(f'<div class="section-title">{t("history")}</div>', unsafe_allow_html=True)
+    tx_list = data["transactions"]
+    num_tx = len(tx_list)
+    show_indices = list(range(max(0, num_tx - 5), num_tx))[::-1]
+
+    if not show_indices:
+        st.markdown(f'<div class="card"><div class="metric-sub">{t("no_tx")}</div></div>', unsafe_allow_html=True)
+        return
+
     for idx in show_indices:
         tx = tx_list[idx]
         edit_key = f"_edit_tx_{idx}"
 
         if st.session_state.get(edit_key, False):
-            # ── inline edit mode ──
-            st.markdown(f'<div class="card" style="padding:.85rem .9rem">',
-                        unsafe_allow_html=True)
-            st.markdown('</div>', unsafe_allow_html=True)
-
-            e_amt = st.number_input(
-                t("edit_amount"), min_value=0.01,
-                value=float(tx.get("amount_entered", 0)),
-                step=1.0, format="%.2f", key=f"eamt_{idx}")
-            e_cat = st.selectbox(
-                t("edit_cat"), cats,
-                index=cats.index(tx_category(tx)) if tx_category(tx) in cats else 0,
-                key=f"ecat_{idx}")
-            e_note = st.text_input(
-                t("edit_note"),
-                value=tx.get("note", ""), key=f"enote_{idx}")
-            e_amor = st.checkbox(
-                t("amortize"),
-                value=bool(tx.get("amortized", False)), key=f"eamor_{idx}")
+            e_amt = st.number_input(t("edit_amount"), min_value=0.01,
+                                    value=float(tx.get("amount_entered", 0)),
+                                    step=1.0, format="%.2f", key=f"eamt_{idx}")
+            e_cat = st.selectbox(t("edit_cat"), cats,
+                                 index=cats.index(tx_category(tx)) if tx_category(tx) in cats else 0,
+                                 key=f"ecat_{idx}")
+            e_note = st.text_input(t("edit_note"), value=tx.get("note", ""), key=f"enote_{idx}")
+            e_amor = st.checkbox(t("amortize"), value=bool(tx.get("amortized", False)), key=f"eamor_{idx}")
 
             s_col, c_col = st.columns(2, gap="small")
             with s_col:
-                if st.button(t("save"), key=f"save_tx_{idx}",
-                             use_container_width=True):
+                if st.button(t("save"), key=f"save_tx_{idx}", use_container_width=True):
                     old_charged = float(tx.get("amount_charged", 0))
-                    new_charged = round(float(e_amt) * 0.5, 2) if e_amor \
-                        else round(float(e_amt), 2)
-
-                    data["remaining_balance"] = round(
-                        data["remaining_balance"] + old_charged - new_charged, 2)
-
+                    new_charged = round(float(e_amt) * 0.5, 2) if e_amor else round(float(e_amt), 2)
+                    data["remaining_balance"] = round(data["remaining_balance"] + old_charged - new_charged, 2)
                     tx["amount_entered"] = round(float(e_amt), 2)
                     tx["amount_charged"] = new_charged
                     tx["category"] = e_cat
                     tx.pop("category_key", None)
                     tx["note"] = e_note.strip()
                     tx["amortized"] = bool(e_amor)
-
                     save_data(data)
                     st.session_state[edit_key] = False
                     st.session_state["flash_success"] = t("tx_updated")
                     st.rerun()
             with c_col:
-                if st.button(t("cancel"), key=f"cancel_tx_{idx}",
-                             use_container_width=True):
+                if st.button(t("cancel"), key=f"cancel_tx_{idx}", use_container_width=True):
                     st.session_state[edit_key] = False
                     st.rerun()
         else:
-            # ── display mode ──
             ts = tx.get("timestamp", "").replace("T", " ")
             cat = tx_category(tx)
             amr = "Amortized" if tx.get("amortized") else "Standard"
@@ -1095,19 +1149,35 @@ else:
               {n_html}
             </div>""", unsafe_allow_html=True)
 
-            act_l, act_r, act_pad = st.columns([1, 1, 4])
-            with act_l:
-                if st.button("✏️", key=f"editbtn_{idx}",
-                             use_container_width=True):
+            al, ar, ap = st.columns([1, 1, 4])
+            with al:
+                if st.button("✏️", key=f"editbtn_{idx}", use_container_width=True):
                     st.session_state[edit_key] = True
                     st.rerun()
-            with act_r:
-                if st.button("✕", key=f"delbtn_{idx}",
-                             use_container_width=True):
+            with ar:
+                if st.button("✕", key=f"delbtn_{idx}", use_container_width=True):
                     removed = tx_list.pop(idx)
                     data["remaining_balance"] = round(
-                        data["remaining_balance"]
-                        + float(removed.get("amount_charged", 0)), 2)
+                        data["remaining_balance"] + float(removed.get("amount_charged", 0)), 2)
                     save_data(data)
                     st.session_state["flash_info"] = t("tx_deleted")
                     st.rerun()
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Dynamic module rendering
+# ══════════════════════════════════════════════════════════════════════════
+
+RENDERERS = {
+    "hero": render_hero,
+    "log_expense": render_log_expense,
+    "category": render_category,
+    "target": render_target,
+    "extra_deposit": render_extra_deposit,
+    "target_pace": render_target_pace,
+    "history": render_history,
+}
+
+for mod in get_modules(data):
+    if mod.get("enabled", True) and mod["id"] in RENDERERS:
+        RENDERERS[mod["id"]]()
