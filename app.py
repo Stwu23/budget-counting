@@ -594,13 +594,17 @@ def is_enabled(data: dict, mid: str) -> bool:
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
-:root{
+:root,:root[data-theme]{
+  color-scheme:light!important;
   --bg:#eee1ce;--card:#fffdfa;--card-soft:#f8f1e6;--text:#2f2922;
   --muted:#7e7264;--border:rgba(73,58,39,.12);
   --green:#4f8a5f;--yellow:#c89d4f;--red:#bb5d4a;--accent:#9c7651;
 }
+@media(prefers-color-scheme:dark){
+  :root,:root[data-theme]{color-scheme:light!important}
+}
 html,body,[data-testid="stAppViewContainer"],.stApp,.main{
-  background:var(--bg)!important;color:var(--text);
+  background:var(--bg)!important;color:var(--text)!important;color-scheme:light!important;
   font-family:'DM Sans','Noto Sans JP',system-ui,sans-serif;
 }
 .stApp{background:radial-gradient(1100px 450px at 95% -10%,#d7be9f 0%,var(--bg) 58%)!important}
@@ -660,6 +664,23 @@ div[data-testid="stForm"]{background:var(--card);border:1px solid var(--border);
   min-height:2.75rem;font-weight:620;font-size:.95rem;
 }
 .stButton>button:hover{background:#f5ece0!important;border-color:rgba(156,118,81,.4)!important}
+
+/* ── Force light theme on ALL Streamlit internals ── */
+[data-testid="stAppViewContainer"] *,
+[data-testid="stForm"] *,
+.stApp *{
+  color-scheme:light!important;
+}
+[data-baseweb="input"],
+[data-baseweb="input"]>div,
+[data-baseweb="textarea"],
+[data-baseweb="textarea"]>div,
+[data-baseweb="select"],
+[data-baseweb="select"]>div,
+[data-baseweb="popover"],
+[data-baseweb="popover"]>div{
+  color-scheme:light!important;
+}
 
 /* ── Unified warm-tone form controls ── */
 
