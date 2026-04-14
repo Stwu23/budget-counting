@@ -7,10 +7,12 @@ Inline editing · custom categories · user-configurable module layout.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
+import requests as _req
 import altair as alt
 import streamlit as st
 
@@ -374,24 +376,88 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
-def load_data() -> dict[str, Any]:
-    if not DATA_FILE.exists():
-        d = _default_data()
-        save_data(d)
-        return d
+# ── Cloud storage (Supabase REST API) ─────────────────────────────────────
+
+_SB_URL: str = ""
+_SB_KEY: str = ""
+_SB_ROW_ID = "default"
+
+try:
+    _sb = st.secrets.get("supabase", {})
+    _SB_URL = str(_sb.get("url", "")).rstrip("/")
+    _SB_KEY = str(_sb.get("key", ""))
+except Exception:
+    pass
+
+_USE_CLOUD = bool(_SB_URL and _SB_KEY)
+_log = logging.getLogger("pulse.storage")
+
+
+def _sb_headers() -> dict[str, str]:
+    return {
+        "apikey": _SB_KEY,
+        "Authorization": f"Bearer {_SB_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def _cloud_load() -> dict[str, Any] | None:
+    if not _USE_CLOUD:
+        return None
     try:
-        with DATA_FILE.open("r", encoding="utf-8") as f:
-            d = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        d = _default_data()
-        save_data(d)
-        return d
-    return _normalize(d)
+        r = _req.get(
+            f"{_SB_URL}/rest/v1/budget_data"
+            f"?id=eq.{_SB_ROW_ID}&select=data",
+            headers=_sb_headers(), timeout=8)
+        if r.status_code == 200:
+            rows = r.json()
+            if rows and rows[0].get("data"):
+                return rows[0]["data"]
+    except Exception as e:
+        _log.warning("cloud load failed: %s", e)
+    return None
+
+
+def _cloud_save(d: dict[str, Any]) -> None:
+    if not _USE_CLOUD:
+        return
+    try:
+        headers = _sb_headers()
+        headers["Prefer"] = "resolution=merge-duplicates"
+        _req.post(
+            f"{_SB_URL}/rest/v1/budget_data",
+            json={"id": _SB_ROW_ID, "data": d,
+                  "updated_at": datetime.now().isoformat(timespec="seconds")},
+            headers=headers, timeout=8)
+    except Exception as e:
+        _log.warning("cloud save failed: %s", e)
+
+
+# ── Load / Save (cloud-first, local fallback) ────────────────────────────
+
+def load_data() -> dict[str, Any]:
+    cloud = _cloud_load()
+    if cloud:
+        return _normalize(cloud)
+    if DATA_FILE.exists():
+        try:
+            with DATA_FILE.open("r", encoding="utf-8") as f:
+                d = json.load(f)
+            return _normalize(d)
+        except (json.JSONDecodeError, OSError):
+            pass
+    d = _default_data()
+    save_data(d)
+    return d
 
 
 def save_data(d: dict[str, Any]) -> None:
-    with DATA_FILE.open("w", encoding="utf-8") as f:
-        json.dump(d, f, indent=2, ensure_ascii=False)
+    try:
+        with DATA_FILE.open("w", encoding="utf-8") as f:
+            json.dump(d, f, indent=2, ensure_ascii=False)
+    except OSError:
+        pass
+    _cloud_save(d)
 
 
 def sum_charged(txs: list[dict]) -> float:
