@@ -72,7 +72,9 @@ LANG: dict[str, dict[str, str]] = {
         "note": "备注（可选）",
         "amortize": "分期计入？仅计本周一半",
         "add_btn": "记一笔",
-        "enter_positive": "请输入大于 $0 的金额。",
+        "enter_positive": "请输入大于 0 的金额。",
+        "enter_valid": "请输入有效的数字。",
+        "amount_placeholder": "输入金额，如 15、8.5",
         "logged": "已记录 {v} · {c}",
         "amortize_msg": "仅一半计入本周，记得下周补记另一半。",
         "undo": "撤销上一笔",
@@ -178,7 +180,9 @@ LANG: dict[str, dict[str, str]] = {
         "note": "Note (optional)",
         "amortize": "Amortize? Count only half this week",
         "add_btn": "Add Expense",
-        "enter_positive": "Enter an amount greater than $0.",
+        "enter_positive": "Enter an amount greater than 0.",
+        "enter_valid": "Please enter a valid number.",
+        "amount_placeholder": "e.g. 15, 8.5",
         "logged": "Logged {v} · {c}",
         "amortize_msg": "Only half counted this week. Remember to log the other half next week.",
         "undo": "Undo Last",
@@ -291,6 +295,18 @@ def current_month_key(today: date | None = None) -> str:
 
 def fmt(v: float) -> str:
     return f"${v:,.2f}"
+
+
+def _parse_amt(text: str) -> float | None:
+    """Parse user-entered amount text. Returns None if invalid."""
+    s = text.strip().replace(",", "").replace("$", "").replace("¥", "")
+    if not s:
+        return None
+    try:
+        v = float(s)
+        return v if v > 0 else None
+    except ValueError:
+        return None
 
 
 def days_left_in_week(today: date | None = None) -> int:
@@ -922,14 +938,15 @@ def render_log_expense():
             st.rerun()
     else:
         with st.form("expense_form", clear_on_submit=True):
-            amt = st.number_input(t("amount"), min_value=0.0, step=1.0, format="%.2f")
+            amt_text = st.text_input(t("amount"), placeholder=t("amount_placeholder"))
             cat_label = st.selectbox(t("category"), cats)
             note = st.text_input(t("note"))
             amor = st.checkbox(t("amortize"))
             submitted = st.form_submit_button(t("add_btn"), use_container_width=True)
         if submitted:
-            if amt <= 0:
-                st.warning(t("enter_positive"))
+            amt = _parse_amt(amt_text)
+            if amt is None:
+                st.warning(t("enter_valid"))
             else:
                 charged = round(amt * 0.5, 2) if amor else round(amt, 2)
                 tx = {
@@ -1099,13 +1116,14 @@ def render_extra_deposit():
     st.markdown(f'<div class="metric-sub" style="margin-bottom:.5rem">{t("extra_deposit_desc")}</div>', unsafe_allow_html=True)
 
     with st.form("deposit_form", clear_on_submit=True):
-        dep_amt = st.number_input(t("amount"), min_value=0.0, step=10.0, format="%.2f", key="dep_amt")
+        dep_amt_text = st.text_input(t("amount"), placeholder=t("amount_placeholder"), key="dep_amt")
         dep_note = st.text_input(t("extra_note"), key="dep_note")
         dep_sub = st.form_submit_button(t("add_deposit"), use_container_width=True)
 
     if dep_sub:
-        if dep_amt <= 0:
-            st.warning(t("enter_positive"))
+        dep_amt = _parse_amt(dep_amt_text)
+        if dep_amt is None:
+            st.warning(t("enter_valid"))
         else:
             dep_val = round(float(dep_amt), 2)
             data["target"]["extra_total"] = round(tgt_extra + dep_val, 2)
@@ -1164,9 +1182,11 @@ def _render_tx_item(tx: dict, idx: int, tx_list: list):
     edit_key = f"_edit_tx_{idx}"
 
     if st.session_state.get(edit_key, False):
-        e_amt = st.number_input(t("edit_amount"), min_value=0.01,
-                                value=float(tx.get("amount_entered", 0)),
-                                step=1.0, format="%.2f", key=f"eamt_{idx}")
+        cur_amt = tx.get("amount_entered", 0)
+        e_amt_text = st.text_input(
+            t("edit_amount"),
+            value=str(int(cur_amt)) if cur_amt == int(cur_amt) else str(cur_amt),
+            key=f"eamt_{idx}")
         e_cat = st.selectbox(t("edit_cat"), cats,
                              index=cats.index(tx_category(tx)) if tx_category(tx) in cats else 0,
                              key=f"ecat_{idx}")
@@ -1176,6 +1196,10 @@ def _render_tx_item(tx: dict, idx: int, tx_list: list):
         s_col, c_col = st.columns(2, gap="small")
         with s_col:
             if st.button(t("save"), key=f"save_tx_{idx}", use_container_width=True):
+                e_amt = _parse_amt(e_amt_text)
+                if e_amt is None:
+                    st.warning(t("enter_valid"))
+                    st.stop()
                 old_charged = float(tx.get("amount_charged", 0))
                 new_charged = round(float(e_amt) * 0.5, 2) if e_amor else round(float(e_amt), 2)
                 data["remaining_balance"] = round(data["remaining_balance"] + old_charged - new_charged, 2)
