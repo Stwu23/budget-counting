@@ -666,9 +666,45 @@ div[data-baseweb="input"] input,div[data-baseweb="textarea"] textarea{
   border-radius:12px!important;border:1px solid var(--border)!important;
   min-height:2.7rem;font-size:1rem;
 }
+div[data-baseweb="input"] input:focus,div[data-baseweb="textarea"] textarea:focus{
+  border-color:rgba(156,118,81,.45)!important;
+  box-shadow:0 0 0 1px rgba(156,118,81,.25)!important;
+}
 div[data-baseweb="select"]>div{
   background:#fffefb!important;border-radius:12px!important;
   min-height:2.7rem;border:1px solid var(--border)!important;
+}
+div[data-baseweb="select"]>div[aria-expanded="true"],
+div[data-baseweb="select"]>div:focus-within{
+  border-color:rgba(156,118,81,.45)!important;
+  box-shadow:0 0 0 1px rgba(156,118,81,.25)!important;
+}
+div[data-baseweb="popover"] ul{
+  background:#fffefb!important;border:1px solid var(--border)!important;
+  border-radius:12px!important;
+}
+div[data-baseweb="popover"] li{color:var(--text)!important}
+div[data-baseweb="popover"] li[aria-selected="true"]{background:var(--card-soft)!important}
+
+label[data-testid="stWidgetLabel"]{
+  color:var(--muted)!important;font-size:.84rem!important;font-weight:500!important;
+}
+div[data-testid="stCheckbox"] label span{color:var(--text)!important;font-size:.88rem!important}
+div[data-testid="stCheckbox"] svg{color:var(--accent)!important}
+div[data-baseweb="checkbox"] div{
+  border-color:var(--border)!important;border-radius:6px!important;
+}
+div[data-testid="stNumberInput"] input{
+  background:#fffefb!important;color:var(--text)!important;
+  border-radius:12px!important;border:1px solid var(--border)!important;
+}
+div[data-testid="stNumberInput"] input:focus{
+  border-color:rgba(156,118,81,.45)!important;
+  box-shadow:0 0 0 1px rgba(156,118,81,.25)!important;
+}
+div[data-testid="stNumberInput"] button{
+  border-color:var(--border)!important;color:var(--muted)!important;
+  background:var(--card-soft)!important;
 }
 div[data-testid="stNotification"],.stAlert{
   background:#fffbf5!important;border:1px solid rgba(90,70,48,.15)!important;
@@ -938,9 +974,15 @@ def render_log_expense():
             st.rerun()
     else:
         with st.form("expense_form", clear_on_submit=True):
-            amt_text = st.text_input(t("amount"), placeholder=t("amount_placeholder"))
-            cat_label = st.selectbox(t("category"), cats)
-            note = st.text_input(t("note"))
+            amt_text = st.text_input(
+                t("amount"), placeholder=t("amount_placeholder"),
+                label_visibility="visible")
+            cat_label = st.selectbox(
+                t("category"), cats,
+                label_visibility="visible")
+            note = st.text_input(
+                t("note"),
+                label_visibility="visible")
             amor = st.checkbox(t("amortize"))
             submitted = st.form_submit_button(t("add_btn"), use_container_width=True)
         if submitted:
@@ -1116,8 +1158,12 @@ def render_extra_deposit():
     st.markdown(f'<div class="metric-sub" style="margin-bottom:.5rem">{t("extra_deposit_desc")}</div>', unsafe_allow_html=True)
 
     with st.form("deposit_form", clear_on_submit=True):
-        dep_amt_text = st.text_input(t("amount"), placeholder=t("amount_placeholder"), key="dep_amt")
-        dep_note = st.text_input(t("extra_note"), key="dep_note")
+        dep_amt_text = st.text_input(
+            t("amount"), placeholder=t("amount_placeholder"),
+            key="dep_amt", label_visibility="visible")
+        dep_note = st.text_input(
+            t("extra_note"), key="dep_note",
+            label_visibility="visible")
         dep_sub = st.form_submit_button(t("add_deposit"), use_container_width=True)
 
     if dep_sub:
@@ -1186,11 +1232,14 @@ def _render_tx_item(tx: dict, idx: int, tx_list: list):
         e_amt_text = st.text_input(
             t("edit_amount"),
             value=str(int(cur_amt)) if cur_amt == int(cur_amt) else str(cur_amt),
-            key=f"eamt_{idx}")
-        e_cat = st.selectbox(t("edit_cat"), cats,
-                             index=cats.index(tx_category(tx)) if tx_category(tx) in cats else 0,
-                             key=f"ecat_{idx}")
-        e_note = st.text_input(t("edit_note"), value=tx.get("note", ""), key=f"enote_{idx}")
+            key=f"eamt_{idx}", label_visibility="visible")
+        e_cat = st.selectbox(
+            t("edit_cat"), cats,
+            index=cats.index(tx_category(tx)) if tx_category(tx) in cats else 0,
+            key=f"ecat_{idx}", label_visibility="visible")
+        e_note = st.text_input(
+            t("edit_note"), value=tx.get("note", ""),
+            key=f"enote_{idx}", label_visibility="visible")
         e_amor = st.checkbox(t("amortize"), value=bool(tx.get("amortized", False)), key=f"eamor_{idx}")
 
         s_col, c_col = st.columns(2, gap="small")
