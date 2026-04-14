@@ -1,6 +1,6 @@
 """
 Pulse — behavior-driven weekly budget app.
-Single-file Streamlit · JSON persistence · i18n (zh/en) · dark fintech UI.
+Single-file Streamlit · JSON persistence · i18n (zh/en) · Japanese wood-tone UI.
 """
 
 from __future__ import annotations
@@ -40,16 +40,17 @@ LANG: dict[str, dict[str, str]] = {
         "budget_progress": "本周预算进度",
         "pct_left": "剩余占周预算",
         "panic_over": "Panic Mode：你已超支",
-        "settings_title": "设置",
+        "settings_title": "预算设置",
         "weekly_allowance": "每周额度",
         "save_allowance": "保存额度",
         "allowance_saved": "周额度已更新为 {v}。",
         "target_settings": "储蓄目标设定",
         "target_name": "目标名称",
-        "target_total": "总价",
+        "target_total": "目标总价",
         "monthly_goal": "月度目标",
         "save_target": "保存目标",
         "target_saved_msg": "储蓄目标已保存。",
+        "edit_target": "编辑目标",
         "log_expense": "快速记账",
         "amount": "金额",
         "category": "分类",
@@ -76,7 +77,7 @@ LANG: dict[str, dict[str, str]] = {
         "category_insights": "分类洞察",
         "no_spending": "本周尚无支出，记账后即可查看分类占比。",
         "insight": "洞察",
-        "top_spend": "Top spend: {c} ({p}%)",
+        "top_spend": "最大支出: {c} ({p}%)",
         "top_spend_sub": "本周最大支出类别是 {c}。",
         "target_section": "储蓄目标",
         "completed": "已完成",
@@ -129,7 +130,7 @@ LANG: dict[str, dict[str, str]] = {
         "budget_progress": "Budget Progress",
         "pct_left": "of weekly budget left",
         "panic_over": "Panic Mode: You are over budget by",
-        "settings_title": "Settings",
+        "settings_title": "Budget Settings",
         "weekly_allowance": "Weekly Allowance",
         "save_allowance": "Save Allowance",
         "allowance_saved": "Weekly allowance updated to {v}.",
@@ -139,6 +140,7 @@ LANG: dict[str, dict[str, str]] = {
         "monthly_goal": "Monthly Goal",
         "save_target": "Save Target",
         "target_saved_msg": "Savings target saved.",
+        "edit_target": "Edit Target",
         "log_expense": "Log Expense",
         "amount": "Amount",
         "category": "Category",
@@ -220,7 +222,6 @@ def cat_labels() -> list[str]:
 
 
 def cat_key_from_label(label: str) -> str:
-    """Persist the i18n-independent key, not the display label."""
     lang = st.session_state.get("lang", "zh")
     d = LANG.get(lang, LANG["zh"])
     for k in CATEGORIES_KEY:
@@ -379,13 +380,13 @@ def status_state(rem: float, allow: float) -> tuple[str, str]:
 
 def progress_style(rem: float, allow: float) -> tuple[float, str]:
     if allow <= 0:
-        return 0.0, "#f87171"
+        return 0.0, "#bb5d4a"
     pct = max(0.0, min(100.0, rem / allow * 100))
     if pct > 50:
-        return pct, "#34d399"
+        return pct, "#4f8a5f"
     if pct >= 20:
-        return pct, "#fbbf24"
-    return pct, "#f87171"
+        return pct, "#c89d4f"
+    return pct, "#bb5d4a"
 
 
 def burn_msg(rem: float, allow: float, dl: int) -> str:
@@ -418,80 +419,155 @@ def pace_status(ratio: float) -> tuple[str, str]:
     return t("behind"), "pace-behind"
 
 
-# ── CSS (dark fintech) ───────────────────────────────────────────────────
+# ── CSS — Japanese wood-tone, warm & clean ────────────────────────────────
 
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 :root{
-  --bg0:#0c0e12;--bg1:#12151c;--card:#161a22;--card2:#1b202a;
-  --stroke:rgba(255,255,255,.08);--text:#e8eaef;--muted:#9aa3b2;
-  --accent:#5eead4;--accent2:#38bdf8;
+  --bg:#eee1ce;
+  --card:#fffdfa;
+  --card-soft:#f8f1e6;
+  --text:#2f2922;
+  --muted:#7e7264;
+  --border:rgba(73,58,39,.12);
+  --green:#4f8a5f;
+  --yellow:#c89d4f;
+  --red:#bb5d4a;
+  --accent:#9c7651;
 }
 html,body,[data-testid="stAppViewContainer"],.stApp,.main{
-  background:
-    radial-gradient(1200px 600px at 80% -20%,rgba(56,189,248,.08),transparent 55%),
-    radial-gradient(900px 500px at 10% 0%,rgba(94,234,212,.07),transparent 50%),
-    linear-gradient(180deg,var(--bg0),var(--bg1))!important;
-  color:var(--text);font-family:'DM Sans',system-ui,sans-serif;
+  background:var(--bg)!important;
+  color:var(--text);
+  font-family:'DM Sans','Noto Sans JP',system-ui,sans-serif;
 }
-header[data-testid="stHeader"]{background:transparent}
-[data-testid="stToolbar"],#MainMenu{visibility:hidden;height:0}
-.block-container{padding-top:.55rem;padding-bottom:calc(2rem + env(safe-area-inset-bottom));max-width:520px}
+.stApp{
+  background:radial-gradient(1100px 450px at 95% -10%,#d7be9f 0%,var(--bg) 58%)!important;
+}
+header[data-testid="stHeader"]{background:transparent!important}
+[data-testid="stToolbar"],#MainMenu,footer{visibility:hidden;height:0;position:fixed}
+.block-container{
+  padding-top:.5rem;
+  padding-bottom:calc(2rem + env(safe-area-inset-bottom));
+  max-width:520px;
+}
 
-.pulse-brand{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:.35rem}
-.card{background:linear-gradient(145deg,var(--card),var(--card2));border:1px solid var(--stroke);border-radius:20px;padding:1rem 1.05rem;margin-bottom:.75rem;box-shadow:0 18px 40px rgba(0,0,0,.35)}
-.hero-card{padding:1.15rem 1.1rem 1.05rem;border-radius:22px;background:linear-gradient(160deg,#1a1f29,#141821);border:1px solid rgba(94,234,212,.12)}
-.hero-label{color:var(--muted);font-size:.92rem;font-weight:500}
-.hero-amount{font-size:clamp(2.1rem,9vw,3.1rem);line-height:1.08;font-weight:700;margin:.35rem 0 .55rem;letter-spacing:-.03em;background:linear-gradient(90deg,#f8fafc,#cbd5e1);-webkit-background-clip:text;background-clip:text;color:transparent}
+.pulse-brand{
+  font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;margin-bottom:.3rem;
+}
 
-.state-pill{display:inline-flex;align-items:center;border-radius:999px;padding:.38rem .78rem;font-size:.82rem;font-weight:600;border:1px solid transparent}
-.chill{background:rgba(52,211,153,.12);color:#6ee7b7;border-color:rgba(52,211,153,.28)}
-.careful{background:rgba(251,191,36,.12);color:#fcd34d;border-color:rgba(251,191,36,.28)}
-.danger{background:rgba(248,113,113,.12);color:#fca5a5;border-color:rgba(248,113,113,.26)}
-.panic{background:rgba(248,113,113,.18);color:#fecaca;border-color:rgba(248,113,113,.35)}
+.card{
+  background:linear-gradient(180deg,#fffefc 0%,var(--card) 100%);
+  border:1px solid var(--border);
+  border-radius:20px;padding:1rem 1.05rem;
+  box-shadow:0 10px 24px rgba(93,74,51,.10);
+  margin-bottom:.75rem;
+}
+.hero-card{
+  padding:1.2rem 1.1rem;border-radius:24px;
+  background:linear-gradient(145deg,#fffaf3 0%,#fffdf9 100%);
+  border:1px solid rgba(111,84,54,.16);
+}
+.hero-label{color:#75695d;font-size:.95rem;font-weight:500}
+.hero-amount{
+  font-size:clamp(2rem,7.8vw,3.25rem);line-height:1.1;font-weight:750;
+  margin:.3rem 0 .45rem;letter-spacing:-.02em;color:var(--text);
+}
 
-.metric-label{color:var(--muted);font-size:.82rem;margin-bottom:.2rem;font-weight:500}
-.metric-value{font-size:1.45rem;font-weight:700;letter-spacing:-.02em}
-.metric-sub{color:#8b95a8;font-size:.78rem;margin-top:.15rem;line-height:1.35}
+.state-pill{
+  display:inline-flex;align-items:center;border-radius:999px;
+  padding:.35rem .72rem;font-size:.82rem;font-weight:600;
+  border:1px solid transparent;
+}
+.chill{background:rgba(79,138,95,.12);color:#3f7650;border-color:rgba(79,138,95,.28)}
+.careful{background:rgba(200,157,79,.14);color:#8f6b2f;border-color:rgba(200,157,79,.30)}
+.danger,.panic{background:rgba(187,93,74,.14);color:#8a4337;border-color:rgba(187,93,74,.30)}
 
-.section-title{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:#7c869a;font-weight:600;margin:1rem 0 .45rem .15rem}
+.metric-label{color:var(--muted);font-size:.86rem;margin-bottom:.2rem;font-weight:500}
+.metric-value{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;color:var(--text)}
+.metric-sub{color:#6f655a;font-size:.82rem;margin-top:.12rem;line-height:1.35}
 
-.progress-track{width:100%;height:10px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;margin:.4rem 0 .15rem}
+.section-title{
+  font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;
+  color:#8a7e72;font-weight:600;margin:1rem 0 .45rem .15rem;
+}
+
+.progress-track{
+  width:100%;height:12px;border-radius:999px;
+  background:rgba(90,70,48,.12);overflow:hidden;margin:.4rem 0 .15rem;
+}
 .progress-fill{height:100%;border-radius:999px;transition:width .35s ease}
 
 .bar-row{margin:.42rem 0 .65rem}
-.bar-head{display:flex;justify-content:space-between;gap:.6rem;font-size:.82rem;margin-bottom:.22rem;color:#b4bcc9}
-.mini-track{width:100%;height:7px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden}
-.mini-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent2),var(--accent))}
+.bar-head{
+  display:flex;justify-content:space-between;gap:.6rem;
+  font-size:.86rem;margin-bottom:.25rem;color:#5f5448;
+}
+.mini-track{
+  width:100%;height:8px;border-radius:999px;
+  background:rgba(90,70,48,.12);overflow:hidden;
+}
+.mini-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#b78b5a,#8f6b44)}
 
-.tx-item{background:rgba(255,255,255,.03);border:1px solid var(--stroke);border-radius:14px;padding:.72rem .82rem;margin-bottom:.42rem}
+.tx-item{
+  background:var(--card-soft);border:1px solid var(--border);
+  border-radius:14px;padding:.72rem .82rem;margin-bottom:.42rem;
+}
 .tx-top{display:flex;justify-content:space-between;gap:.8rem;align-items:center}
-.tx-cat{font-weight:600;font-size:.9rem}
-.tx-charge{font-size:.95rem;font-weight:700;color:#f1f5f9}
-.tx-meta{color:var(--muted);font-size:.74rem;margin-top:.15rem}
-.tx-note{color:#aeb6c5;font-size:.8rem;margin-top:.2rem}
+.tx-cat{font-weight:620;font-size:.91rem}
+.tx-charge{font-size:.95rem;font-weight:700;color:var(--text)}
+.tx-meta{color:var(--muted);font-size:.77rem;margin-top:.15rem}
+.tx-note{color:#61574c;font-size:.81rem;margin-top:.2rem}
 
-div[data-testid="stForm"]{background:linear-gradient(145deg,var(--card),#151922);border:1px solid var(--stroke);border-radius:18px;padding:.9rem .9rem .25rem;margin-bottom:.65rem}
-.stButton>button,.stFormSubmitButton>button{border-radius:14px!important;border:1px solid rgba(255,255,255,.12)!important;background:linear-gradient(180deg,#1f2633,#1a202b)!important;color:#e8eaef!important;min-height:2.85rem;font-weight:600;font-size:.95rem}
-.stButton>button:hover{border-color:rgba(94,234,212,.35)!important}
+div[data-testid="stForm"]{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:20px;padding:.95rem .95rem .35rem;margin-bottom:.65rem;
+}
+.stButton>button,.stFormSubmitButton>button{
+  border-radius:12px!important;
+  border:1px solid rgba(90,70,48,.2)!important;
+  background:#fffaf3!important;
+  color:#3f342a!important;
+  min-height:2.75rem;font-weight:620;font-size:.95rem;
+}
+.stButton>button:hover{
+  background:#f5ece0!important;
+  border-color:rgba(156,118,81,.4)!important;
+}
 
-div[data-baseweb="input"] input,div[data-baseweb="textarea"] textarea{background:#0f1218!important;color:#e8eaef!important;border-radius:12px!important;border:1px solid rgba(255,255,255,.1)!important;min-height:2.75rem;font-size:1.05rem}
-div[data-baseweb="select"]>div{background:#0f1218!important;border-radius:12px!important;min-height:2.75rem;border:1px solid rgba(255,255,255,.1)!important}
+div[data-baseweb="input"] input,div[data-baseweb="textarea"] textarea{
+  background:#fffefb!important;color:var(--text)!important;
+  border-radius:12px!important;border:1px solid var(--border)!important;
+  min-height:2.7rem;font-size:1rem;
+}
+div[data-baseweb="select"]>div{
+  background:#fffefb!important;border-radius:12px!important;
+  min-height:2.7rem;border:1px solid var(--border)!important;
+}
 
-div[data-testid="stNotification"],.stAlert{background:rgba(15,18,24,.92)!important;border:1px solid rgba(255,255,255,.08)!important;border-radius:14px!important}
-.streamlit-expanderHeader{font-weight:600!important;color:#cbd5e1!important}
+div[data-testid="stNotification"],.stAlert{
+  background:#fffbf5!important;
+  border:1px solid rgba(90,70,48,.15)!important;
+  border-radius:14px!important;
+  color:var(--text)!important;
+}
+.streamlit-expanderHeader{font-weight:600!important;color:#4a3f34!important}
 [data-testid="stMarkdownContainer"] table{width:100%;border-collapse:collapse;font-size:.82rem}
-[data-testid="stMarkdownContainer"] th,[data-testid="stMarkdownContainer"] td{border-bottom:1px solid rgba(255,255,255,.08);padding:.45rem .35rem;text-align:left}
+[data-testid="stMarkdownContainer"] th,[data-testid="stMarkdownContainer"] td{
+  border-bottom:1px solid var(--border);padding:.45rem .35rem;text-align:left;
+}
 [data-testid="stMarkdownContainer"] th{color:var(--muted);font-weight:600}
 
-.pace-ahead{color:#6ee7b7}.pace-ok{color:#fcd34d}.pace-behind{color:#fca5a5}
+.pace-ahead{color:#3f7650}.pace-ok{color:#8f6b2f}.pace-behind{color:#8a4337}
 
-.lang-toggle{display:flex;gap:.35rem;justify-content:flex-end;margin-bottom:.1rem}
-.lang-btn{font-size:.78rem;padding:.28rem .62rem;border-radius:999px;border:1px solid rgba(255,255,255,.15);background:transparent;color:var(--muted);cursor:pointer;font-weight:600}
-.lang-btn.active{background:rgba(94,234,212,.12);color:#5eead4;border-color:rgba(94,234,212,.35)}
+.small-muted{color:var(--muted);font-size:.78rem;margin-top:.18rem}
 
-@media(max-width:640px){.block-container{padding-left:.75rem;padding-right:.75rem}}
+@media(max-width:640px){
+  .block-container{padding-left:.7rem;padding-right:.7rem}
+  .hero-card{border-radius:20px}.card{border-radius:16px}
+  .hero-amount{font-size:2.35rem}
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -502,18 +578,16 @@ data = load_data()
 if "lang" not in st.session_state:
     st.session_state["lang"] = data.get("lang", "zh")
 
-# Language toggle — top-right
-lc1, lc2 = st.columns([4, 1])
-with lc2:
+# ── Language toggle — simple button, top-right ────────────────────────────
+
+_lpad, _lbtn = st.columns([5, 1])
+with _lbtn:
     cur_lang = st.session_state["lang"]
-    labels = {"zh": "中文", "en": "EN"}
-    options = list(labels.keys())
-    sel = st.segmented_control("", options, default=cur_lang,
-                               format_func=lambda x: labels[x],
-                               key="lang_toggle", label_visibility="collapsed")
-    if sel and sel != cur_lang:
-        st.session_state["lang"] = sel
-        data["lang"] = sel
+    next_lang = "en" if cur_lang == "zh" else "zh"
+    btn_label = "EN" if cur_lang == "zh" else "中文"
+    if st.button(btn_label, key="lang_btn", use_container_width=True):
+        st.session_state["lang"] = next_lang
+        data["lang"] = next_lang
         save_data(data)
         st.rerun()
 
@@ -521,11 +595,9 @@ with lc2:
 if ensure_week_current(data):
     st.session_state["flash_info"] = t("auto_week")
 
-# Ensure numeric
 data["weekly_allowance"] = float(data.get("weekly_allowance", DEFAULT_ALLOWANCE))
 data["remaining_balance"] = float(data.get("remaining_balance", data["weekly_allowance"]))
 
-# Flash messages
 if "flash_info" in st.session_state:
     st.info(st.session_state.pop("flash_info"))
 if "flash_success" in st.session_state:
@@ -562,7 +634,9 @@ last_wk_save = 0.0
 if data["weekly_savings_log"]:
     last_wk_save = float(data["weekly_savings_log"][-1].get("saved", 0))
 
-# ── HERO ──────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# HERO
+# ══════════════════════════════════════════════════════════════════════════
 
 st.markdown(f"""
 <div class="card hero-card">
@@ -599,7 +673,9 @@ st.markdown(f"""
 if rem < 0:
     st.error(f"{t('panic_over')} {fmt(abs(rem))}")
 
-# ── Settings (collapsible) ───────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Allowance Settings (collapsible)
+# ══════════════════════════════════════════════════════════════════════════
 
 with st.expander(t("settings_title"), expanded=False):
     new_a = st.number_input(t("weekly_allowance"), min_value=1.0,
@@ -611,28 +687,13 @@ with st.expander(t("settings_title"), expanded=False):
         data["weekly_allowance"] = round(float(new_a), 2)
         data["remaining_balance"] = round(data["weekly_allowance"] - spent_so, 2)
         save_data(data)
-        st.session_state["flash_success"] = t("allowance_saved").format(v=fmt(data["weekly_allowance"]))
+        st.session_state["flash_success"] = t("allowance_saved").format(
+            v=fmt(data["weekly_allowance"]))
         st.rerun()
 
-    st.markdown(f"**{t('target_settings')}**")
-    tc1, tc2, tc3 = st.columns(3)
-    with tc1:
-        tn = st.text_input(t("target_name"), value=str(tgt["name"]))
-    with tc2:
-        tt = st.number_input(t("target_total"), min_value=1.0,
-                             value=float(tgt["total"]), step=50.0)
-    with tc3:
-        tm = st.number_input(t("monthly_goal"), min_value=0.0,
-                             value=float(tgt["monthly_goal"]), step=25.0)
-    if st.button(t("save_target"), use_container_width=True):
-        data["target"]["name"] = tn.strip() or "My Goal"
-        data["target"]["total"] = round(float(tt), 2)
-        data["target"]["monthly_goal"] = round(float(tm), 2)
-        save_data(data)
-        st.session_state["flash_success"] = t("target_saved_msg")
-        st.rerun()
-
-# ── Log Expense ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Log Expense
+# ══════════════════════════════════════════════════════════════════════════
 
 st.markdown(f'<div id="log" class="section-title">{t("log_expense")}</div>',
             unsafe_allow_html=True)
@@ -686,15 +747,18 @@ with u2:
         st.session_state["flash_info"] = t("new_week_done")
         st.rerun()
 
-# ── Category Insights ─────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Category Insights
+# ══════════════════════════════════════════════════════════════════════════
 
 summary, total_spent = cat_summary(data["transactions"])
 st.markdown(f'<div class="section-title">{t("category_insights")}</div>',
             unsafe_allow_html=True)
 
 if total_spent <= 0:
-    st.markdown(f'<div class="card"><div class="metric-sub">{t("no_spending")}</div></div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="card"><div class="metric-sub">{t("no_spending")}</div></div>',
+        unsafe_allow_html=True)
 else:
     sorted_cats = sorted(summary.items(), key=lambda x: x[1], reverse=True)
     chart_rows = []
@@ -702,24 +766,24 @@ else:
         pct = (val / total_spent) * 100
         chart_rows.append({"category": t(ck), "spent": val, "pct": pct})
 
-    palette = ["#5eead4", "#38bdf8", "#a78bfa", "#fb7185",
-               "#fbbf24", "#34d399", "#94a3b8", "#64748b"]
+    palette = ["#b1885b", "#c5a171", "#9d7e59", "#d1b28a",
+               "#a58b69", "#b79b79", "#8f7355", "#c8b18f"]
 
     donut = (
         alt.Chart(alt.Data(values=chart_rows))
-        .mark_arc(innerRadius=52, outerRadius=88, cornerRadius=3)
+        .mark_arc(innerRadius=58, outerRadius=92, cornerRadius=4)
         .encode(
             theta=alt.Theta("spent:Q", stack=True),
             color=alt.Color("category:N",
                             scale=alt.Scale(range=palette),
                             legend=alt.Legend(orient="bottom", columns=2,
-                                             labelColor="#cbd5e1",
+                                             labelColor="#5f5347",
                                              symbolType="circle", title=None)),
             tooltip=[alt.Tooltip("category:N", title=t("category")),
                      alt.Tooltip("spent:Q", title="$", format=",.2f"),
                      alt.Tooltip("pct:Q", title="%", format=".1f")],
         )
-        .properties(height=240)
+        .properties(height=250)
         .configure_view(strokeWidth=0)
         .configure(background="transparent")
     )
@@ -732,7 +796,7 @@ else:
         st.markdown(f"""
         <div class="bar-row">
           <div class="bar-head"><span>{t(ck)}</span><span>{fmt(val)} · {pct:.0f}%</span></div>
-          <div class="mini-track"><div class="mini-fill" style="width:{min(100, pct):.1f}%"></div></div>
+          <div class="mini-track"><div class="mini-fill" style="width:{min(100,pct):.1f}%"></div></div>
         </div>""", unsafe_allow_html=True)
 
     top_k, top_v = sorted_cats[0]
@@ -744,7 +808,9 @@ else:
       <div class="metric-sub">{t("top_spend_sub").format(c=t(top_k))}</div>
     </div>""", unsafe_allow_html=True)
 
-# ── Target Card ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Target Card + Edit Target (visible, not hidden)
+# ══════════════════════════════════════════════════════════════════════════
 
 st.markdown(f'<div class="section-title">{t("target_section")}</div>',
             unsafe_allow_html=True)
@@ -755,7 +821,7 @@ st.markdown(f"""
   <div class="metric-value" style="font-size:1.65rem">{fmt(tgt_saved)} / {fmt(tgt_total)}</div>
   <div class="metric-sub">{tgt_pct:.1f}% {t("completed")}</div>
   <div class="progress-track" style="margin-top:.55rem">
-    <div class="progress-fill" style="width:{tgt_pct:.1f}%;background:linear-gradient(90deg,#5eead4,#38bdf8)"></div>
+    <div class="progress-fill" style="width:{tgt_pct:.1f}%;background:linear-gradient(90deg,#b78b5a,#8f6b44)"></div>
   </div>
 </div>""", unsafe_allow_html=True)
 
@@ -764,8 +830,27 @@ st.markdown(f"""
 <div class="card">
   <div class="metric-sub" style="margin-bottom:.35rem">{t("breakdown_auto")}: <strong>{fmt(tgt_auto)}</strong></div>
   <div class="metric-sub">{t("breakdown_extra")}: <strong>{fmt(tgt_extra)}</strong></div>
-  <div class="metric-sub" style="margin-top:.35rem;color:#e8eaef;font-size:.88rem"><strong>{t("breakdown_total")}: {fmt(tgt_saved)}</strong></div>
+  <div class="metric-sub" style="margin-top:.35rem;font-size:.88rem"><strong>{t("breakdown_total")}: {fmt(tgt_saved)}</strong></div>
 </div>""", unsafe_allow_html=True)
+
+# ── Edit Target — directly visible ───────────────────────────────────────
+
+with st.expander(t("edit_target"), expanded=False):
+    tc1, tc2 = st.columns(2)
+    with tc1:
+        tn = st.text_input(t("target_name"), value=str(tgt["name"]), key="tgt_name_input")
+    with tc2:
+        tt = st.number_input(t("target_total"), min_value=1.0,
+                             value=float(tgt["total"]), step=50.0, key="tgt_total_input")
+    tm = st.number_input(t("monthly_goal"), min_value=0.0,
+                         value=float(tgt["monthly_goal"]), step=25.0, key="tgt_monthly_input")
+    if st.button(t("save_target"), use_container_width=True, key="save_tgt_btn"):
+        data["target"]["name"] = tn.strip() or "My Goal"
+        data["target"]["total"] = round(float(tt), 2)
+        data["target"]["monthly_goal"] = round(float(tm), 2)
+        save_data(data)
+        st.session_state["flash_success"] = t("target_saved_msg")
+        st.rerun()
 
 # Weekly contribution
 cw1, cw2 = st.columns(2)
@@ -795,12 +880,15 @@ if rows_md:
         f"| {t('week_col')} | {t('budget_col')} | {t('spent_col')} | {t('saved_col')} |\n"
         "| --- | --- | --- | --- |\n" + "\n".join(rows_md))
 
-# ── Extra Deposit ─────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Extra Deposit
+# ══════════════════════════════════════════════════════════════════════════
 
 st.markdown(f'<div class="section-title">{t("extra_deposit")}</div>',
             unsafe_allow_html=True)
-st.markdown(f'<div class="metric-sub" style="margin-bottom:.5rem">{t("extra_deposit_desc")}</div>',
-            unsafe_allow_html=True)
+st.markdown(
+    f'<div class="metric-sub" style="margin-bottom:.5rem">{t("extra_deposit_desc")}</div>',
+    unsafe_allow_html=True)
 
 with st.form("deposit_form", clear_on_submit=True):
     dep_amt = st.number_input(t("amount"), min_value=0.0, step=10.0,
@@ -814,20 +902,20 @@ if dep_sub:
     else:
         dep_val = round(float(dep_amt), 2)
         data["target"]["extra_total"] = round(tgt_extra + dep_val, 2)
-
         data["extra_deposits"].append({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
             "amount": dep_val,
             "note": dep_note.strip(),
         })
         data["extra_deposits"] = data["extra_deposits"][-50:]
-
         data["monthly_extra_deposits"][mk] = round(m_extra + dep_val, 2)
         save_data(data)
         st.session_state["flash_success"] = t("deposit_done").format(v=fmt(dep_val))
         st.rerun()
 
-# ── Target Pace ───────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# Target Pace
+# ══════════════════════════════════════════════════════════════════════════
 
 st.markdown(f'<div class="section-title">{t("target_pace")}</div>',
             unsafe_allow_html=True)
@@ -844,15 +932,18 @@ st.markdown(f"""
   <div class="metric-sub" style="margin-top:.45rem">{t("pace_tip").format(n=tgt["name"])}</div>
 </div>""", unsafe_allow_html=True)
 
-# ── History ───────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# History
+# ══════════════════════════════════════════════════════════════════════════
 
 st.markdown(f'<div class="section-title">{t("history")}</div>',
             unsafe_allow_html=True)
 
 recent = list(reversed(data["transactions"][-5:]))
 if not recent:
-    st.markdown(f'<div class="card"><div class="metric-sub">{t("no_tx")}</div></div>',
-                unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="card"><div class="metric-sub">{t("no_tx")}</div></div>',
+        unsafe_allow_html=True)
 else:
     for tx in recent:
         ts = tx.get("timestamp", "").replace("T", " ")
@@ -864,8 +955,8 @@ else:
         <div class="tx-item">
           <div class="tx-top">
             <div class="tx-cat">{t(ck)}</div>
-            <div class="tx-charge">{fmt(float(tx.get("amount_charged", 0)))}</div>
+            <div class="tx-charge">{fmt(float(tx.get("amount_charged",0)))}</div>
           </div>
-          <div class="tx-meta">{ts} · {t("entered")} {fmt(float(tx.get("amount_entered", 0)))} · {amr}</div>
+          <div class="tx-meta">{ts} · {t("entered")} {fmt(float(tx.get("amount_entered",0)))} · {amr}</div>
           {n_html}
         </div>""", unsafe_allow_html=True)
