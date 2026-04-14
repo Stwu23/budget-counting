@@ -661,23 +661,47 @@ div[data-testid="stForm"]{background:var(--card);border:1px solid var(--border);
 }
 .stButton>button:hover{background:#f5ece0!important;border-color:rgba(156,118,81,.4)!important}
 
-div[data-baseweb="input"] input,div[data-baseweb="textarea"] textarea{
+input,textarea,
+div[data-baseweb="input"] input,
+div[data-baseweb="textarea"] textarea,
+[data-testid="stTextInput"] input,
+[data-testid="stNumberInput"] input,
+[data-testid="stTextArea"] textarea{
   background:#fffefb!important;color:var(--text)!important;
-  border-radius:12px!important;border:1px solid var(--border)!important;
+  border-radius:12px!important;
+  border:1px solid var(--border)!important;
+  outline:none!important;
   min-height:2.7rem;font-size:1rem;
+  box-shadow:none!important;
 }
-div[data-baseweb="input"] input:focus,div[data-baseweb="textarea"] textarea:focus{
+input:focus,textarea:focus,
+div[data-baseweb="input"] input:focus,
+[data-testid="stTextInput"] input:focus,
+[data-testid="stNumberInput"] input:focus,
+[data-testid="stTextArea"] textarea:focus{
   border-color:rgba(156,118,81,.45)!important;
-  box-shadow:0 0 0 1px rgba(156,118,81,.25)!important;
+  box-shadow:0 0 0 1px rgba(156,118,81,.18)!important;
+  outline:none!important;
 }
-div[data-baseweb="select"]>div{
+div[data-baseweb="input"],
+div[data-baseweb="input"][data-focused="true"]{
+  border-color:transparent!important;
+  box-shadow:none!important;
+  background:transparent!important;
+}
+
+div[data-baseweb="select"]>div,
+div[data-baseweb="select"]>div:hover{
   background:#fffefb!important;border-radius:12px!important;
-  min-height:2.7rem;border:1px solid var(--border)!important;
+  min-height:2.7rem;
+  border:1px solid var(--border)!important;
+  box-shadow:none!important;outline:none!important;
 }
 div[data-baseweb="select"]>div[aria-expanded="true"],
+div[data-baseweb="select"]>div:focus,
 div[data-baseweb="select"]>div:focus-within{
   border-color:rgba(156,118,81,.45)!important;
-  box-shadow:0 0 0 1px rgba(156,118,81,.25)!important;
+  box-shadow:0 0 0 1px rgba(156,118,81,.18)!important;
 }
 div[data-baseweb="popover"] ul{
   background:#fffefb!important;border:1px solid var(--border)!important;
@@ -691,20 +715,19 @@ label[data-testid="stWidgetLabel"]{
 }
 div[data-testid="stCheckbox"] label span{color:var(--text)!important;font-size:.88rem!important}
 div[data-testid="stCheckbox"] svg{color:var(--accent)!important}
-div[data-baseweb="checkbox"] div{
+div[data-baseweb="checkbox"]>div:first-child{
   border-color:var(--border)!important;border-radius:6px!important;
+  background:transparent!important;
 }
-div[data-testid="stNumberInput"] input{
-  background:#fffefb!important;color:var(--text)!important;
-  border-radius:12px!important;border:1px solid var(--border)!important;
+div[data-baseweb="checkbox"]>div:first-child[aria-checked="true"]{
+  background:var(--accent)!important;border-color:var(--accent)!important;
 }
-div[data-testid="stNumberInput"] input:focus{
-  border-color:rgba(156,118,81,.45)!important;
-  box-shadow:0 0 0 1px rgba(156,118,81,.25)!important;
-}
-div[data-testid="stNumberInput"] button{
+[data-testid="stNumberInput"] button{
   border-color:var(--border)!important;color:var(--muted)!important;
   background:var(--card-soft)!important;
+}
+[data-testid="stNumberInput"] [data-baseweb="input"]{
+  border:none!important;box-shadow:none!important;
 }
 div[data-testid="stNotification"],.stAlert{
   background:#fffbf5!important;border:1px solid rgba(90,70,48,.15)!important;
@@ -728,6 +751,9 @@ div[data-testid="stNotification"],.stAlert{
 }
 .mod-row:last-child{border-bottom:none}
 .mod-name{flex:1;font-weight:500}
+
+iframe[title="vegalite"]{max-width:100%!important;overflow:hidden}
+[data-testid="stVegaLiteChart"]{overflow:hidden!important;max-width:100%!important}
 
 @media(max-width:640px){
   .block-container{padding-left:.7rem;padding-right:.7rem}
@@ -1041,7 +1067,7 @@ def render_category():
 
     donut = (
         alt.Chart(alt.Data(values=chart_rows))
-        .mark_arc(innerRadius=58, outerRadius=92, cornerRadius=4)
+        .mark_arc(innerRadius=42, outerRadius=72, cornerRadius=4)
         .encode(
             theta=alt.Theta("spent:Q", stack=True),
             color=alt.Color("category:N", scale=alt.Scale(range=palette),
@@ -1051,9 +1077,9 @@ def render_category():
                      alt.Tooltip("spent:Q", title="$", format=",.2f"),
                      alt.Tooltip("pct:Q", title="%", format=".1f")],
         )
-        .properties(height=250)
+        .properties(width="container", height=200)
         .configure_view(strokeWidth=0)
-        .configure(background="transparent")
+        .configure(background="transparent", autosize=alt.AutoSizeParams(type="fit", contains="padding"))
     )
     st.markdown('<div class="card">', unsafe_allow_html=True)
     st.altair_chart(donut, use_container_width=True)
