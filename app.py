@@ -661,73 +661,85 @@ div[data-testid="stForm"]{background:var(--card);border:1px solid var(--border);
 }
 .stButton>button:hover{background:#f5ece0!important;border-color:rgba(156,118,81,.4)!important}
 
+/* ── Kill ALL black borders on every baseweb / streamlit widget ── */
+[data-baseweb] *,
+[data-testid^="st"] input,
+[data-testid^="st"] textarea,
+[data-testid^="st"] select{
+  outline:none!important;
+}
+[data-baseweb="input"],
+[data-baseweb="input"]>div,
+[data-baseweb="textarea"],
+[data-baseweb="textarea"]>div{
+  border:none!important;box-shadow:none!important;
+  background:transparent!important;
+}
 input,textarea,
-div[data-baseweb="input"] input,
-div[data-baseweb="textarea"] textarea,
 [data-testid="stTextInput"] input,
 [data-testid="stNumberInput"] input,
 [data-testid="stTextArea"] textarea{
   background:#fffefb!important;color:var(--text)!important;
   border-radius:12px!important;
   border:1px solid var(--border)!important;
-  outline:none!important;
+  outline:none!important;box-shadow:none!important;
   min-height:2.7rem;font-size:1rem;
-  box-shadow:none!important;
 }
-input:focus,textarea:focus,
-div[data-baseweb="input"] input:focus,
-[data-testid="stTextInput"] input:focus,
-[data-testid="stNumberInput"] input:focus,
-[data-testid="stTextArea"] textarea:focus{
+input:focus,textarea:focus{
   border-color:rgba(156,118,81,.45)!important;
-  box-shadow:0 0 0 1px rgba(156,118,81,.18)!important;
+  box-shadow:0 0 0 2px rgba(156,118,81,.15)!important;
   outline:none!important;
-}
-div[data-baseweb="input"],
-div[data-baseweb="input"][data-focused="true"]{
-  border-color:transparent!important;
-  box-shadow:none!important;
-  background:transparent!important;
 }
 
-div[data-baseweb="select"]>div,
-div[data-baseweb="select"]>div:hover{
+[data-baseweb="select"],
+[data-baseweb="select"]>div{
+  border:none!important;box-shadow:none!important;
+  outline:none!important;background:transparent!important;
+}
+[data-baseweb="select"] [role="combobox"],
+[data-baseweb="select"]>div>div{
   background:#fffefb!important;border-radius:12px!important;
   min-height:2.7rem;
   border:1px solid var(--border)!important;
   box-shadow:none!important;outline:none!important;
 }
-div[data-baseweb="select"]>div[aria-expanded="true"],
-div[data-baseweb="select"]>div:focus,
-div[data-baseweb="select"]>div:focus-within{
+[data-baseweb="select"][aria-expanded="true"]>div>div,
+[data-baseweb="select"]:focus-within>div>div{
   border-color:rgba(156,118,81,.45)!important;
-  box-shadow:0 0 0 1px rgba(156,118,81,.18)!important;
+  box-shadow:0 0 0 2px rgba(156,118,81,.15)!important;
 }
-div[data-baseweb="popover"] ul{
+[data-baseweb="popover"] ul{
   background:#fffefb!important;border:1px solid var(--border)!important;
   border-radius:12px!important;
 }
-div[data-baseweb="popover"] li{color:var(--text)!important}
-div[data-baseweb="popover"] li[aria-selected="true"]{background:var(--card-soft)!important}
+[data-baseweb="popover"] li{color:var(--text)!important}
+[data-baseweb="popover"] li[aria-selected="true"]{background:var(--card-soft)!important}
 
 label[data-testid="stWidgetLabel"]{
   color:var(--muted)!important;font-size:.84rem!important;font-weight:500!important;
 }
-div[data-testid="stCheckbox"] label span{color:var(--text)!important;font-size:.88rem!important}
-div[data-testid="stCheckbox"] svg{color:var(--accent)!important}
-div[data-baseweb="checkbox"]>div:first-child{
+[data-testid="stCheckbox"] label span{color:var(--text)!important;font-size:.88rem!important}
+[data-testid="stCheckbox"] svg{color:var(--accent)!important}
+[data-baseweb="checkbox"]>div:first-child{
   border-color:var(--border)!important;border-radius:6px!important;
-  background:transparent!important;
+  background:transparent!important;box-shadow:none!important;
 }
-div[data-baseweb="checkbox"]>div:first-child[aria-checked="true"]{
+[data-baseweb="checkbox"]>div:first-child[aria-checked="true"]{
   background:var(--accent)!important;border-color:var(--accent)!important;
 }
 [data-testid="stNumberInput"] button{
   border-color:var(--border)!important;color:var(--muted)!important;
   background:var(--card-soft)!important;
 }
-[data-testid="stNumberInput"] [data-baseweb="input"]{
-  border:none!important;box-shadow:none!important;
+[data-testid="stNumberInput"] [data-baseweb="input"],
+[data-testid="stNumberInput"] [data-baseweb="input"]>div{
+  border:none!important;box-shadow:none!important;background:transparent!important;
+}
+/* Bottom accent line on focused inputs */
+[data-testid="stTextInput"]>div::after,
+[data-testid="stNumberInput"]>div::after,
+[data-testid="stTextArea"]>div::after{
+  display:none!important;
 }
 div[data-testid="stNotification"],.stAlert{
   background:#fffbf5!important;border:1px solid rgba(90,70,48,.15)!important;
