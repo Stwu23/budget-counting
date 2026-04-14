@@ -1,6 +1,7 @@
 """
 Pulse — behavior-driven weekly budget app.
-Single-file Streamlit · JSON persistence · i18n (zh/en) · Japanese wood-tone UI.
+Single-file Streamlit · JSON persistence · i18n · warm wood-tone UI.
+Inline editing · custom categories · minimal language toggle.
 """
 
 from __future__ import annotations
@@ -21,9 +22,13 @@ st.set_page_config(page_title="Pulse", page_icon="◉", layout="centered",
 DATA_FILE = Path(__file__).with_name("budget_data.json")
 DEFAULT_ALLOWANCE = 150.0
 
-CATEGORIES_KEY = [
-    "cat_restaurant", "cat_grocery", "cat_online", "cat_transport",
-    "cat_coffee", "cat_entertainment", "cat_school", "cat_other",
+DEFAULT_CATS_ZH = [
+    "餐厅 / 外食", "超市 / 杂货", "网购", "交通",
+    "咖啡 / 饮品", "娱乐", "学习 / 文具", "其他",
+]
+DEFAULT_CATS_EN = [
+    "Restaurant / Food", "Grocery / Supermarket", "Online Shopping", "Transport",
+    "Coffee / Drinks", "Entertainment", "School / Supplies", "Other",
 ]
 
 # ── i18n ──────────────────────────────────────────────────────────────────
@@ -40,17 +45,15 @@ LANG: dict[str, dict[str, str]] = {
         "budget_progress": "本周预算进度",
         "pct_left": "剩余占周预算",
         "panic_over": "Panic Mode：你已超支",
-        "settings_title": "预算设置",
         "weekly_allowance": "每周额度",
-        "save_allowance": "保存额度",
+        "save": "保存",
+        "cancel": "取消",
+        "done": "完成",
         "allowance_saved": "周额度已更新为 {v}。",
-        "target_settings": "储蓄目标设定",
         "target_name": "目标名称",
         "target_total": "目标总价",
         "monthly_goal": "月度目标",
-        "save_target": "保存目标",
         "target_saved_msg": "储蓄目标已保存。",
-        "edit_target": "编辑目标",
         "log_expense": "快速记账",
         "amount": "金额",
         "category": "分类",
@@ -66,14 +69,6 @@ LANG: dict[str, dict[str, str]] = {
         "new_week": "新一周",
         "new_week_done": "已开始新一周，流水已清空，结余已计入目标。",
         "auto_week": "新的一周已开始，预算已自动重置。",
-        "cat_restaurant": "餐厅 / 外食",
-        "cat_grocery": "超市 / 杂货",
-        "cat_online": "网购",
-        "cat_transport": "交通",
-        "cat_coffee": "咖啡 / 饮品",
-        "cat_entertainment": "娱乐",
-        "cat_school": "学习 / 文具",
-        "cat_other": "其他",
         "category_insights": "分类洞察",
         "no_spending": "本周尚无支出，记账后即可查看分类占比。",
         "insight": "洞察",
@@ -118,6 +113,14 @@ LANG: dict[str, dict[str, str]] = {
         "budget_col": "额度",
         "spent_col": "支出",
         "saved_col": "省下",
+        "manage_cats": "管理分类",
+        "add_category": "添加新分类",
+        "add": "添加",
+        "cat_added": "已添加分类「{c}」。",
+        "cat_deleted": "已删除分类「{c}」。",
+        "cat_exists": "该分类已存在。",
+        "cat_empty": "请输入分类名称。",
+        "pace_saved": "月度目标已更新。",
     },
     "en": {
         "brand": "Pulse",
@@ -130,17 +133,15 @@ LANG: dict[str, dict[str, str]] = {
         "budget_progress": "Budget Progress",
         "pct_left": "of weekly budget left",
         "panic_over": "Panic Mode: You are over budget by",
-        "settings_title": "Budget Settings",
         "weekly_allowance": "Weekly Allowance",
-        "save_allowance": "Save Allowance",
+        "save": "Save",
+        "cancel": "Cancel",
+        "done": "Done",
         "allowance_saved": "Weekly allowance updated to {v}.",
-        "target_settings": "Target Settings",
         "target_name": "Target Name",
         "target_total": "Total Price",
         "monthly_goal": "Monthly Goal",
-        "save_target": "Save Target",
         "target_saved_msg": "Savings target saved.",
-        "edit_target": "Edit Target",
         "log_expense": "Log Expense",
         "amount": "Amount",
         "category": "Category",
@@ -156,14 +157,6 @@ LANG: dict[str, dict[str, str]] = {
         "new_week": "New Week",
         "new_week_done": "New week started. Savings credited to target.",
         "auto_week": "New week detected — budget reset automatically.",
-        "cat_restaurant": "Restaurant / Food",
-        "cat_grocery": "Grocery / Supermarket",
-        "cat_online": "Online Shopping",
-        "cat_transport": "Transport",
-        "cat_coffee": "Coffee / Drinks",
-        "cat_entertainment": "Entertainment",
-        "cat_school": "School / Supplies",
-        "cat_other": "Other",
         "category_insights": "Category Insights",
         "no_spending": "No spending logged yet this week.",
         "insight": "Insight",
@@ -208,6 +201,14 @@ LANG: dict[str, dict[str, str]] = {
         "budget_col": "Budget",
         "spent_col": "Spent",
         "saved_col": "Saved",
+        "manage_cats": "Manage Categories",
+        "add_category": "Add new category",
+        "add": "Add",
+        "cat_added": "Category \"{c}\" added.",
+        "cat_deleted": "Category \"{c}\" deleted.",
+        "cat_exists": "This category already exists.",
+        "cat_empty": "Enter a category name.",
+        "pace_saved": "Monthly goal updated.",
     },
 }
 
@@ -217,17 +218,14 @@ def t(key: str) -> str:
     return LANG.get(lang, LANG["zh"]).get(key, key)
 
 
-def cat_labels() -> list[str]:
-    return [t(k) for k in CATEGORIES_KEY]
+# ── Inline edit helpers ───────────────────────────────────────────────────
+
+def _editing(key: str) -> bool:
+    return st.session_state.get(f"_edit_{key}", False)
 
 
-def cat_key_from_label(label: str) -> str:
-    lang = st.session_state.get("lang", "zh")
-    d = LANG.get(lang, LANG["zh"])
-    for k in CATEGORIES_KEY:
-        if d.get(k) == label:
-            return k
-    return "cat_other"
+def _toggle(key: str) -> None:
+    st.session_state[f"_edit_{key}"] = not st.session_state.get(f"_edit_{key}", False)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -266,6 +264,7 @@ def _default_data() -> dict[str, Any]:
         "current_week_id": current_week_id(),
         "remaining_balance": DEFAULT_ALLOWANCE,
         "transactions": [],
+        "categories": list(DEFAULT_CATS_ZH),
         "target": _default_target(),
         "extra_deposits": [],
         "weekly_savings_log": [],
@@ -282,6 +281,12 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
     base["remaining_balance"] = float(base.get("remaining_balance", base["weekly_allowance"]))
     base["transactions"] = list(base.get("transactions", []))
 
+    if "categories" not in raw or not raw["categories"]:
+        base["categories"] = list(
+            DEFAULT_CATS_ZH if base["lang"] == "zh" else DEFAULT_CATS_EN)
+    else:
+        base["categories"] = list(base["categories"])
+
     tgt = base.get("target") or {}
     dt = _default_target()
     dt.update(tgt)
@@ -294,7 +299,8 @@ def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
 
     base["extra_deposits"] = list(base.get("extra_deposits", []))
     base["weekly_savings_log"] = list(base.get("weekly_savings_log", []))
-    base["monthly_auto_saved"] = dict(base.get("monthly_auto_saved", base.get("monthly_saved", {})))
+    base["monthly_auto_saved"] = dict(
+        base.get("monthly_auto_saved", base.get("monthly_saved", {})))
     base["monthly_extra_deposits"] = dict(base.get("monthly_extra_deposits", {}))
     return base
 
@@ -327,11 +333,9 @@ def _credit_week(data: dict, week_id: str, txs: list[dict], allow: float) -> flo
     spent = sum_charged(txs)
     saved = max(round(allow - spent, 2), 0.0)
     data["target"]["auto_saved"] = round(data["target"]["auto_saved"] + saved, 2)
-
     mk = current_month_key()
     data["monthly_auto_saved"][mk] = round(
         float(data["monthly_auto_saved"].get(mk, 0)) + saved, 2)
-
     log = data["weekly_savings_log"]
     log.append({"week_id": week_id, "budget": round(allow, 2),
                 "spent": spent, "saved": saved,
@@ -345,12 +349,10 @@ def start_new_week(data: dict, new_wk: str) -> None:
     old_tx = list(data.get("transactions", []))
     allow = float(data.get("weekly_allowance", DEFAULT_ALLOWANCE))
     rem = float(data.get("remaining_balance", allow))
-
     if old_id != new_wk:
         _credit_week(data, old_id, old_tx, allow)
     elif old_tx or abs(rem - allow) > 0.02:
         _credit_week(data, old_id, old_tx, allow)
-
     data["current_week_id"] = new_wk
     data["remaining_balance"] = round(allow, 2)
     data["transactions"] = []
@@ -400,13 +402,20 @@ def burn_msg(rem: float, allow: float, dl: int) -> str:
     return t("burn_early")
 
 
+def tx_category(tx: dict) -> str:
+    """Get display name from transaction (supports legacy category_key and new category field)."""
+    if "category" in tx:
+        return tx["category"]
+    return tx.get("category_key", "Other")
+
+
 def cat_summary(txs: list[dict]) -> tuple[dict[str, float], float]:
     s: dict[str, float] = {}
     tot = 0.0
     for tx in txs:
         ch = float(tx.get("amount_charged", 0))
-        k = tx.get("category_key", "cat_other")
-        s[k] = s.get(k, 0) + ch
+        cat = tx_category(tx)
+        s[cat] = s.get(cat, 0) + ch
         tot += ch
     return {k: v for k, v in s.items() if v > 0}, tot
 
@@ -419,54 +428,42 @@ def pace_status(ratio: float) -> tuple[str, str]:
     return t("behind"), "pace-behind"
 
 
-# ── CSS — Japanese wood-tone, warm & clean ────────────────────────────────
+# ── CSS — Japanese wood-tone + inline edit styling ────────────────────────
 
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
 :root{
-  --bg:#eee1ce;
-  --card:#fffdfa;
-  --card-soft:#f8f1e6;
-  --text:#2f2922;
-  --muted:#7e7264;
-  --border:rgba(73,58,39,.12);
-  --green:#4f8a5f;
-  --yellow:#c89d4f;
-  --red:#bb5d4a;
-  --accent:#9c7651;
+  --bg:#eee1ce;--card:#fffdfa;--card-soft:#f8f1e6;--text:#2f2922;
+  --muted:#7e7264;--border:rgba(73,58,39,.12);
+  --green:#4f8a5f;--yellow:#c89d4f;--red:#bb5d4a;--accent:#9c7651;
 }
 html,body,[data-testid="stAppViewContainer"],.stApp,.main{
-  background:var(--bg)!important;
-  color:var(--text);
+  background:var(--bg)!important;color:var(--text);
   font-family:'DM Sans','Noto Sans JP',system-ui,sans-serif;
 }
-.stApp{
-  background:radial-gradient(1100px 450px at 95% -10%,#d7be9f 0%,var(--bg) 58%)!important;
-}
+.stApp{background:radial-gradient(1100px 450px at 95% -10%,#d7be9f 0%,var(--bg) 58%)!important}
 header[data-testid="stHeader"]{background:transparent!important}
 [data-testid="stToolbar"],#MainMenu,footer{visibility:hidden;height:0;position:fixed}
-.block-container{
-  padding-top:.5rem;
-  padding-bottom:calc(2rem + env(safe-area-inset-bottom));
-  max-width:520px;
-}
+.block-container{padding-top:.5rem;padding-bottom:calc(2rem + env(safe-area-inset-bottom));max-width:520px}
 
-.pulse-brand{
-  font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;
-  color:var(--muted);font-weight:600;margin-bottom:.3rem;
+.pulse-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:.15rem}
+.pulse-brand{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.lang-pill{
+  font-size:.7rem;padding:.22rem .55rem;border-radius:999px;
+  border:1px solid rgba(73,58,39,.18);background:rgba(255,253,250,.7);
+  color:var(--muted);cursor:pointer;font-weight:600;text-decoration:none;
+  display:inline-flex;align-items:center;gap:.25rem;
 }
 
 .card{
-  background:linear-gradient(180deg,#fffefc 0%,var(--card) 100%);
-  border:1px solid var(--border);
-  border-radius:20px;padding:1rem 1.05rem;
-  box-shadow:0 10px 24px rgba(93,74,51,.10);
-  margin-bottom:.75rem;
+  background:linear-gradient(180deg,#fffefc,var(--card));
+  border:1px solid var(--border);border-radius:20px;padding:1rem 1.05rem;
+  box-shadow:0 10px 24px rgba(93,74,51,.10);margin-bottom:.75rem;
 }
 .hero-card{
   padding:1.2rem 1.1rem;border-radius:24px;
-  background:linear-gradient(145deg,#fffaf3 0%,#fffdf9 100%);
+  background:linear-gradient(145deg,#fffaf3,#fffdf9);
   border:1px solid rgba(111,84,54,.16);
 }
 .hero-label{color:#75695d;font-size:.95rem;font-weight:500}
@@ -474,11 +471,9 @@ header[data-testid="stHeader"]{background:transparent!important}
   font-size:clamp(2rem,7.8vw,3.25rem);line-height:1.1;font-weight:750;
   margin:.3rem 0 .45rem;letter-spacing:-.02em;color:var(--text);
 }
-
 .state-pill{
   display:inline-flex;align-items:center;border-radius:999px;
-  padding:.35rem .72rem;font-size:.82rem;font-weight:600;
-  border:1px solid transparent;
+  padding:.35rem .72rem;font-size:.82rem;font-weight:600;border:1px solid transparent;
 }
 .chill{background:rgba(79,138,95,.12);color:#3f7650;border-color:rgba(79,138,95,.28)}
 .careful{background:rgba(200,157,79,.14);color:#8f6b2f;border-color:rgba(200,157,79,.30)}
@@ -487,54 +482,35 @@ header[data-testid="stHeader"]{background:transparent!important}
 .metric-label{color:var(--muted);font-size:.86rem;margin-bottom:.2rem;font-weight:500}
 .metric-value{font-size:1.55rem;font-weight:700;letter-spacing:-.02em;color:var(--text)}
 .metric-sub{color:#6f655a;font-size:.82rem;margin-top:.12rem;line-height:1.35}
-
 .section-title{
   font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;
   color:#8a7e72;font-weight:600;margin:1rem 0 .45rem .15rem;
 }
+.section-head{display:flex;justify-content:space-between;align-items:center;margin:1rem 0 .45rem .15rem}
+.section-head-label{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:#8a7e72;font-weight:600}
 
-.progress-track{
-  width:100%;height:12px;border-radius:999px;
-  background:rgba(90,70,48,.12);overflow:hidden;margin:.4rem 0 .15rem;
-}
+.progress-track{width:100%;height:12px;border-radius:999px;background:rgba(90,70,48,.12);overflow:hidden;margin:.4rem 0 .15rem}
 .progress-fill{height:100%;border-radius:999px;transition:width .35s ease}
 
 .bar-row{margin:.42rem 0 .65rem}
-.bar-head{
-  display:flex;justify-content:space-between;gap:.6rem;
-  font-size:.86rem;margin-bottom:.25rem;color:#5f5448;
-}
-.mini-track{
-  width:100%;height:8px;border-radius:999px;
-  background:rgba(90,70,48,.12);overflow:hidden;
-}
+.bar-head{display:flex;justify-content:space-between;gap:.6rem;font-size:.86rem;margin-bottom:.25rem;color:#5f5448}
+.mini-track{width:100%;height:8px;border-radius:999px;background:rgba(90,70,48,.12);overflow:hidden}
 .mini-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,#b78b5a,#8f6b44)}
 
-.tx-item{
-  background:var(--card-soft);border:1px solid var(--border);
-  border-radius:14px;padding:.72rem .82rem;margin-bottom:.42rem;
-}
+.tx-item{background:var(--card-soft);border:1px solid var(--border);border-radius:14px;padding:.72rem .82rem;margin-bottom:.42rem}
 .tx-top{display:flex;justify-content:space-between;gap:.8rem;align-items:center}
 .tx-cat{font-weight:620;font-size:.91rem}
 .tx-charge{font-size:.95rem;font-weight:700;color:var(--text)}
 .tx-meta{color:var(--muted);font-size:.77rem;margin-top:.15rem}
 .tx-note{color:#61574c;font-size:.81rem;margin-top:.2rem}
 
-div[data-testid="stForm"]{
-  background:var(--card);border:1px solid var(--border);
-  border-radius:20px;padding:.95rem .95rem .35rem;margin-bottom:.65rem;
-}
+div[data-testid="stForm"]{background:var(--card);border:1px solid var(--border);border-radius:20px;padding:.95rem .95rem .35rem;margin-bottom:.65rem}
 .stButton>button,.stFormSubmitButton>button{
-  border-radius:12px!important;
-  border:1px solid rgba(90,70,48,.2)!important;
-  background:#fffaf3!important;
-  color:#3f342a!important;
+  border-radius:12px!important;border:1px solid rgba(90,70,48,.2)!important;
+  background:#fffaf3!important;color:#3f342a!important;
   min-height:2.75rem;font-weight:620;font-size:.95rem;
 }
-.stButton>button:hover{
-  background:#f5ece0!important;
-  border-color:rgba(156,118,81,.4)!important;
-}
+.stButton>button:hover{background:#f5ece0!important;border-color:rgba(156,118,81,.4)!important}
 
 div[data-baseweb="input"] input,div[data-baseweb="textarea"] textarea{
   background:#fffefb!important;color:var(--text)!important;
@@ -545,23 +521,18 @@ div[data-baseweb="select"]>div{
   background:#fffefb!important;border-radius:12px!important;
   min-height:2.7rem;border:1px solid var(--border)!important;
 }
-
 div[data-testid="stNotification"],.stAlert{
-  background:#fffbf5!important;
-  border:1px solid rgba(90,70,48,.15)!important;
-  border-radius:14px!important;
-  color:var(--text)!important;
+  background:#fffbf5!important;border:1px solid rgba(90,70,48,.15)!important;
+  border-radius:14px!important;color:var(--text)!important;
 }
 .streamlit-expanderHeader{font-weight:600!important;color:#4a3f34!important}
 [data-testid="stMarkdownContainer"] table{width:100%;border-collapse:collapse;font-size:.82rem}
-[data-testid="stMarkdownContainer"] th,[data-testid="stMarkdownContainer"] td{
-  border-bottom:1px solid var(--border);padding:.45rem .35rem;text-align:left;
-}
+[data-testid="stMarkdownContainer"] th,[data-testid="stMarkdownContainer"] td{border-bottom:1px solid var(--border);padding:.45rem .35rem;text-align:left}
 [data-testid="stMarkdownContainer"] th{color:var(--muted);font-weight:600}
 
 .pace-ahead{color:#3f7650}.pace-ok{color:#8f6b2f}.pace-behind{color:#8a4337}
-
-.small-muted{color:var(--muted);font-size:.78rem;margin-top:.18rem}
+.cat-row{display:flex;justify-content:space-between;align-items:center;padding:.4rem 0;border-bottom:1px solid var(--border)}
+.cat-name{font-size:.9rem;color:var(--text)}
 
 @media(max-width:640px){
   .block-container{padding-left:.7rem;padding-right:.7rem}
@@ -571,27 +542,28 @@ div[data-testid="stNotification"],.stAlert{
 </style>
 """, unsafe_allow_html=True)
 
-# ── Load data & language ──────────────────────────────────────────────────
+# ── Load data & init ──────────────────────────────────────────────────────
 
 data = load_data()
 
 if "lang" not in st.session_state:
     st.session_state["lang"] = data.get("lang", "zh")
 
-# ── Language toggle — simple button, top-right ────────────────────────────
+# ── Top bar: brand + language pill ────────────────────────────────────────
 
-_lpad, _lbtn = st.columns([5, 1])
-with _lbtn:
+_top_l, _top_r = st.columns([6, 1])
+with _top_l:
+    st.markdown('<div class="pulse-brand">Pulse</div>', unsafe_allow_html=True)
+with _top_r:
     cur_lang = st.session_state["lang"]
-    next_lang = "en" if cur_lang == "zh" else "zh"
-    btn_label = "EN" if cur_lang == "zh" else "中文"
-    if st.button(btn_label, key="lang_btn", use_container_width=True):
-        st.session_state["lang"] = next_lang
-        data["lang"] = next_lang
+    pill = "EN" if cur_lang == "zh" else "中文"
+    if st.button(pill, key="_lang", use_container_width=True):
+        nl = "en" if cur_lang == "zh" else "zh"
+        st.session_state["lang"] = nl
+        data["lang"] = nl
         save_data(data)
         st.rerun()
 
-# Auto-week
 if ensure_week_current(data):
     st.session_state["flash_info"] = t("auto_week")
 
@@ -603,7 +575,7 @@ if "flash_info" in st.session_state:
 if "flash_success" in st.session_state:
     st.success(st.session_state.pop("flash_success"))
 
-# ── Computed values ───────────────────────────────────────────────────────
+# ── Computed ──────────────────────────────────────────────────────────────
 
 allow = data["weekly_allowance"]
 rem = data["remaining_balance"]
@@ -634,18 +606,51 @@ last_wk_save = 0.0
 if data["weekly_savings_log"]:
     last_wk_save = float(data["weekly_savings_log"][-1].get("saved", 0))
 
+cats = data.get("categories", list(DEFAULT_CATS_ZH))
+
 # ══════════════════════════════════════════════════════════════════════════
-# HERO
+# HERO — with inline allowance editing
 # ══════════════════════════════════════════════════════════════════════════
 
-st.markdown(f"""
-<div class="card hero-card">
-  <div class="pulse-brand">{t("brand")}</div>
-  <div class="hero-label">{t("remaining_week")}</div>
-  <div class="hero-amount">{fmt(rem)}</div>
-  <span class="state-pill {st_class}">{st_label}</span>
-</div>
-""", unsafe_allow_html=True)
+if _editing("allowance"):
+    st.markdown(f"""
+    <div class="card hero-card">
+      <div class="hero-label">{t("weekly_allowance")}</div>
+    </div>""", unsafe_allow_html=True)
+    new_a = st.number_input(t("weekly_allowance"), min_value=1.0,
+                            value=float(data["weekly_allowance"]),
+                            step=5.0, format="%.2f",
+                            key="edit_allow_val", label_visibility="collapsed")
+    sa, sc = st.columns(2, gap="small")
+    with sa:
+        if st.button(t("save"), key="save_allow", use_container_width=True):
+            old_a = float(data["weekly_allowance"])
+            spent_so = round(old_a - float(data["remaining_balance"]), 2)
+            data["weekly_allowance"] = round(float(new_a), 2)
+            data["remaining_balance"] = round(data["weekly_allowance"] - spent_so, 2)
+            save_data(data)
+            _toggle("allowance")
+            st.session_state["flash_success"] = t("allowance_saved").format(
+                v=fmt(data["weekly_allowance"]))
+            st.rerun()
+    with sc:
+        if st.button(t("cancel"), key="cancel_allow", use_container_width=True):
+            _toggle("allowance")
+            st.rerun()
+else:
+    _hero_l, _hero_r = st.columns([20, 1])
+    with _hero_l:
+        st.markdown(f"""
+        <div class="card hero-card">
+          <div class="hero-label">{t("remaining_week")}</div>
+          <div class="hero-amount">{fmt(rem)}</div>
+          <span class="state-pill {st_class}">{st_label}</span>
+          <div class="metric-sub" style="margin-top:.5rem">{t("weekly_allowance")}: {fmt(allow)}</div>
+        </div>""", unsafe_allow_html=True)
+    with _hero_r:
+        if st.button("✏️", key="edit_allow_btn", use_container_width=True):
+            _toggle("allowance")
+            st.rerun()
 
 cA, cB = st.columns(2, gap="small")
 with cA:
@@ -674,78 +679,108 @@ if rem < 0:
     st.error(f"{t('panic_over')} {fmt(abs(rem))}")
 
 # ══════════════════════════════════════════════════════════════════════════
-# Allowance Settings (collapsible)
+# Log Expense + Category Manager
 # ══════════════════════════════════════════════════════════════════════════
 
-with st.expander(t("settings_title"), expanded=False):
-    new_a = st.number_input(t("weekly_allowance"), min_value=1.0,
-                            value=float(data["weekly_allowance"]),
-                            step=5.0, format="%.2f")
-    if st.button(t("save_allowance"), use_container_width=True):
-        old_a = float(data["weekly_allowance"])
-        spent_so = round(old_a - float(data["remaining_balance"]), 2)
-        data["weekly_allowance"] = round(float(new_a), 2)
-        data["remaining_balance"] = round(data["weekly_allowance"] - spent_so, 2)
-        save_data(data)
-        st.session_state["flash_success"] = t("allowance_saved").format(
-            v=fmt(data["weekly_allowance"]))
+_log_l, _log_r = st.columns([20, 1])
+with _log_l:
+    st.markdown(f'<div id="log" class="section-title">{t("log_expense")}</div>',
+                unsafe_allow_html=True)
+with _log_r:
+    if st.button("⚙️", key="manage_cats_btn", use_container_width=True):
+        _toggle("cats")
         st.rerun()
 
-# ══════════════════════════════════════════════════════════════════════════
-# Log Expense
-# ══════════════════════════════════════════════════════════════════════════
+if _editing("cats"):
+    st.markdown(f'<div class="card">', unsafe_allow_html=True)
+    st.markdown(f'<div class="metric-label">{t("manage_cats")}</div>',
+                unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
 
-st.markdown(f'<div id="log" class="section-title">{t("log_expense")}</div>',
-            unsafe_allow_html=True)
+    for i, c in enumerate(cats):
+        cl, cr = st.columns([6, 1])
+        with cl:
+            st.markdown(f'<div style="padding:.35rem 0;font-size:.9rem">{c}</div>',
+                        unsafe_allow_html=True)
+        with cr:
+            if st.button("✕", key=f"del_cat_{i}", use_container_width=True):
+                removed = cats.pop(i)
+                data["categories"] = cats
+                save_data(data)
+                st.session_state["flash_info"] = t("cat_deleted").format(c=removed)
+                st.rerun()
 
-with st.form("expense_form", clear_on_submit=True):
-    amt = st.number_input(t("amount"), min_value=0.0, step=1.0, format="%.2f")
-    cat_label = st.selectbox(t("category"), cat_labels())
-    note = st.text_input(t("note"))
-    amor = st.checkbox(t("amortize"))
-    submitted = st.form_submit_button(t("add_btn"), use_container_width=True)
+    nc_l, nc_r = st.columns([4, 1])
+    with nc_l:
+        new_cat = st.text_input(t("add_category"), key="new_cat_input",
+                                label_visibility="collapsed",
+                                placeholder=t("add_category"))
+    with nc_r:
+        if st.button(t("add"), key="add_cat_btn", use_container_width=True):
+            nc = new_cat.strip()
+            if not nc:
+                st.warning(t("cat_empty"))
+            elif nc in cats:
+                st.warning(t("cat_exists"))
+            else:
+                cats.append(nc)
+                data["categories"] = cats
+                save_data(data)
+                st.session_state["flash_success"] = t("cat_added").format(c=nc)
+                st.rerun()
 
-if submitted:
-    if amt <= 0:
-        st.warning(t("enter_positive"))
-    else:
-        charged = round(amt * 0.5, 2) if amor else round(amt, 2)
-        ck = cat_key_from_label(cat_label)
-        tx = {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "amount_entered": round(float(amt), 2),
-            "amount_charged": charged,
-            "category_key": ck,
-            "note": note.strip(),
-            "amortized": bool(amor),
-        }
-        data["transactions"].append(tx)
-        data["remaining_balance"] = round(data["remaining_balance"] - charged, 2)
-        save_data(data)
-        if amor:
-            st.session_state["flash_success"] = t("amortize_msg")
+    if st.button(t("done"), key="done_cats", use_container_width=True):
+        _toggle("cats")
+        st.rerun()
+else:
+    with st.form("expense_form", clear_on_submit=True):
+        amt = st.number_input(t("amount"), min_value=0.0, step=1.0, format="%.2f")
+        cat_label = st.selectbox(t("category"), cats)
+        note = st.text_input(t("note"))
+        amor = st.checkbox(t("amortize"))
+        submitted = st.form_submit_button(t("add_btn"), use_container_width=True)
+
+    if submitted:
+        if amt <= 0:
+            st.warning(t("enter_positive"))
         else:
-            st.session_state["flash_success"] = t("logged").format(v=fmt(charged), c=t(ck))
-        st.rerun()
-
-u1, u2 = st.columns(2, gap="small")
-with u1:
-    if st.button(t("undo"), use_container_width=True):
-        if data["transactions"]:
-            ltx = data["transactions"].pop()
-            data["remaining_balance"] = round(
-                data["remaining_balance"] + float(ltx["amount_charged"]), 2)
+            charged = round(amt * 0.5, 2) if amor else round(amt, 2)
+            tx = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "amount_entered": round(float(amt), 2),
+                "amount_charged": charged,
+                "category": cat_label,
+                "note": note.strip(),
+                "amortized": bool(amor),
+            }
+            data["transactions"].append(tx)
+            data["remaining_balance"] = round(data["remaining_balance"] - charged, 2)
             save_data(data)
-            st.session_state["flash_info"] = t("undo_done")
+            if amor:
+                st.session_state["flash_success"] = t("amortize_msg")
+            else:
+                st.session_state["flash_success"] = t("logged").format(
+                    v=fmt(charged), c=cat_label)
             st.rerun()
-        else:
-            st.warning(t("no_undo"))
-with u2:
-    if st.button(t("new_week"), use_container_width=True):
-        start_new_week(data, current_week_id())
-        save_data(data)
-        st.session_state["flash_info"] = t("new_week_done")
-        st.rerun()
+
+    u1, u2 = st.columns(2, gap="small")
+    with u1:
+        if st.button(t("undo"), use_container_width=True):
+            if data["transactions"]:
+                ltx = data["transactions"].pop()
+                data["remaining_balance"] = round(
+                    data["remaining_balance"] + float(ltx["amount_charged"]), 2)
+                save_data(data)
+                st.session_state["flash_info"] = t("undo_done")
+                st.rerun()
+            else:
+                st.warning(t("no_undo"))
+    with u2:
+        if st.button(t("new_week"), use_container_width=True):
+            start_new_week(data, current_week_id())
+            save_data(data)
+            st.session_state["flash_info"] = t("new_week_done")
+            st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════
 # Category Insights
@@ -761,10 +796,8 @@ if total_spent <= 0:
         unsafe_allow_html=True)
 else:
     sorted_cats = sorted(summary.items(), key=lambda x: x[1], reverse=True)
-    chart_rows = []
-    for ck, val in sorted_cats:
-        pct = (val / total_spent) * 100
-        chart_rows.append({"category": t(ck), "spent": val, "pct": pct})
+    chart_rows = [{"category": c, "spent": v, "pct": (v / total_spent) * 100}
+                  for c, v in sorted_cats]
 
     palette = ["#b1885b", "#c5a171", "#9d7e59", "#d1b28a",
                "#a58b69", "#b79b79", "#8f7355", "#c8b18f"]
@@ -791,66 +824,78 @@ else:
     st.altair_chart(donut, use_container_width=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-    for ck, val in sorted_cats:
-        pct = (val / total_spent) * 100
+    for c, v in sorted_cats:
+        pct = (v / total_spent) * 100
         st.markdown(f"""
         <div class="bar-row">
-          <div class="bar-head"><span>{t(ck)}</span><span>{fmt(val)} · {pct:.0f}%</span></div>
+          <div class="bar-head"><span>{c}</span><span>{fmt(v)} · {pct:.0f}%</span></div>
           <div class="mini-track"><div class="mini-fill" style="width:{min(100,pct):.1f}%"></div></div>
         </div>""", unsafe_allow_html=True)
 
-    top_k, top_v = sorted_cats[0]
+    top_c, top_v = sorted_cats[0]
     top_p = int((top_v / total_spent) * 100)
     st.markdown(f"""
     <div class="card">
       <div class="metric-label">{t("insight")}</div>
-      <div class="metric-value" style="font-size:1.1rem">{t("top_spend").format(c=t(top_k), p=top_p)}</div>
-      <div class="metric-sub">{t("top_spend_sub").format(c=t(top_k))}</div>
+      <div class="metric-value" style="font-size:1.1rem">{t("top_spend").format(c=top_c, p=top_p)}</div>
+      <div class="metric-sub">{t("top_spend_sub").format(c=top_c)}</div>
     </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════
-# Target Card + Edit Target (visible, not hidden)
+# Target — inline editing
 # ══════════════════════════════════════════════════════════════════════════
 
-st.markdown(f'<div class="section-title">{t("target_section")}</div>',
-            unsafe_allow_html=True)
-
-st.markdown(f"""
-<div class="card">
-  <div class="metric-label">🎯 {tgt["name"]}</div>
-  <div class="metric-value" style="font-size:1.65rem">{fmt(tgt_saved)} / {fmt(tgt_total)}</div>
-  <div class="metric-sub">{tgt_pct:.1f}% {t("completed")}</div>
-  <div class="progress-track" style="margin-top:.55rem">
-    <div class="progress-fill" style="width:{tgt_pct:.1f}%;background:linear-gradient(90deg,#b78b5a,#8f6b44)"></div>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-# Breakdown
-st.markdown(f"""
-<div class="card">
-  <div class="metric-sub" style="margin-bottom:.35rem">{t("breakdown_auto")}: <strong>{fmt(tgt_auto)}</strong></div>
-  <div class="metric-sub">{t("breakdown_extra")}: <strong>{fmt(tgt_extra)}</strong></div>
-  <div class="metric-sub" style="margin-top:.35rem;font-size:.88rem"><strong>{t("breakdown_total")}: {fmt(tgt_saved)}</strong></div>
-</div>""", unsafe_allow_html=True)
-
-# ── Edit Target — directly visible ───────────────────────────────────────
-
-with st.expander(t("edit_target"), expanded=False):
+if _editing("target"):
+    st.markdown(f'<div class="section-title">{t("target_section")}</div>',
+                unsafe_allow_html=True)
+    tn = st.text_input(t("target_name"), value=str(tgt["name"]), key="ed_tgt_n")
     tc1, tc2 = st.columns(2)
     with tc1:
-        tn = st.text_input(t("target_name"), value=str(tgt["name"]), key="tgt_name_input")
-    with tc2:
         tt = st.number_input(t("target_total"), min_value=1.0,
-                             value=float(tgt["total"]), step=50.0, key="tgt_total_input")
-    tm = st.number_input(t("monthly_goal"), min_value=0.0,
-                         value=float(tgt["monthly_goal"]), step=25.0, key="tgt_monthly_input")
-    if st.button(t("save_target"), use_container_width=True, key="save_tgt_btn"):
-        data["target"]["name"] = tn.strip() or "My Goal"
-        data["target"]["total"] = round(float(tt), 2)
-        data["target"]["monthly_goal"] = round(float(tm), 2)
-        save_data(data)
-        st.session_state["flash_success"] = t("target_saved_msg")
-        st.rerun()
+                             value=float(tgt["total"]), step=50.0, key="ed_tgt_t")
+    with tc2:
+        tm = st.number_input(t("monthly_goal"), min_value=0.0,
+                             value=float(tgt["monthly_goal"]), step=25.0, key="ed_tgt_m")
+    sa, sc = st.columns(2, gap="small")
+    with sa:
+        if st.button(t("save"), key="save_tgt", use_container_width=True):
+            data["target"]["name"] = tn.strip() or "My Goal"
+            data["target"]["total"] = round(float(tt), 2)
+            data["target"]["monthly_goal"] = round(float(tm), 2)
+            save_data(data)
+            _toggle("target")
+            st.session_state["flash_success"] = t("target_saved_msg")
+            st.rerun()
+    with sc:
+        if st.button(t("cancel"), key="cancel_tgt", use_container_width=True):
+            _toggle("target")
+            st.rerun()
+else:
+    _tgt_l, _tgt_r = st.columns([20, 1])
+    with _tgt_l:
+        st.markdown(f'<div class="section-title">{t("target_section")}</div>',
+                    unsafe_allow_html=True)
+    with _tgt_r:
+        if st.button("✏️", key="edit_tgt_btn", use_container_width=True):
+            _toggle("target")
+            st.rerun()
+
+    st.markdown(f"""
+    <div class="card">
+      <div class="metric-label">🎯 {tgt["name"]}</div>
+      <div class="metric-value" style="font-size:1.65rem">{fmt(tgt_saved)} / {fmt(tgt_total)}</div>
+      <div class="metric-sub">{tgt_pct:.1f}% {t("completed")}</div>
+      <div class="progress-track" style="margin-top:.55rem">
+        <div class="progress-fill" style="width:{tgt_pct:.1f}%;background:linear-gradient(90deg,#b78b5a,#8f6b44)"></div>
+      </div>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="card">
+      <div class="metric-sub" style="margin-bottom:.35rem">{t("breakdown_auto")}: <strong>{fmt(tgt_auto)}</strong></div>
+      <div class="metric-sub">{t("breakdown_extra")}: <strong>{fmt(tgt_extra)}</strong></div>
+      <div class="metric-sub" style="margin-top:.35rem;font-size:.88rem"><strong>{t("breakdown_total")}: {fmt(tgt_saved)}</strong></div>
+    </div>""", unsafe_allow_html=True)
 
 # Weekly contribution
 cw1, cw2 = st.columns(2)
@@ -869,7 +914,6 @@ with cw2:
       <div class="metric-sub">{t("auto_credit")}</div>
     </div>""", unsafe_allow_html=True)
 
-# Week savings history table
 rows_md = []
 for row in data.get("weekly_savings_log", [])[-6:]:
     rows_md.append(
@@ -904,8 +948,7 @@ if dep_sub:
         data["target"]["extra_total"] = round(tgt_extra + dep_val, 2)
         data["extra_deposits"].append({
             "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "amount": dep_val,
-            "note": dep_note.strip(),
+            "amount": dep_val, "note": dep_note.strip(),
         })
         data["extra_deposits"] = data["extra_deposits"][-50:]
         data["monthly_extra_deposits"][mk] = round(m_extra + dep_val, 2)
@@ -914,23 +957,48 @@ if dep_sub:
         st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════
-# Target Pace
+# Target Pace — inline monthly goal editing
 # ══════════════════════════════════════════════════════════════════════════
 
-st.markdown(f'<div class="section-title">{t("target_pace")}</div>',
-            unsafe_allow_html=True)
+if _editing("pace"):
+    st.markdown(f'<div class="section-title">{t("target_pace")}</div>',
+                unsafe_allow_html=True)
+    new_mg = st.number_input(t("monthly_goal"), min_value=0.0,
+                             value=float(tgt["monthly_goal"]),
+                             step=25.0, key="ed_pace_mg")
+    sa, sc = st.columns(2, gap="small")
+    with sa:
+        if st.button(t("save"), key="save_pace", use_container_width=True):
+            data["target"]["monthly_goal"] = round(float(new_mg), 2)
+            save_data(data)
+            _toggle("pace")
+            st.session_state["flash_success"] = t("pace_saved")
+            st.rerun()
+    with sc:
+        if st.button(t("cancel"), key="cancel_pace", use_container_width=True):
+            _toggle("pace")
+            st.rerun()
+else:
+    _pc_l, _pc_r = st.columns([20, 1])
+    with _pc_l:
+        st.markdown(f'<div class="section-title">{t("target_pace")}</div>',
+                    unsafe_allow_html=True)
+    with _pc_r:
+        if st.button("✏️", key="edit_pace_btn", use_container_width=True):
+            _toggle("pace")
+            st.rerun()
 
-st.markdown(f"""
-<div class="card">
-  <div class="metric-label">{t("monthly_goal_label")}</div>
-  <div class="metric-value">{fmt(m_goal)}</div>
-  <div class="metric-sub" style="margin-top:.6rem">{t("month_auto")}: <strong>{fmt(m_auto)}</strong></div>
-  <div class="metric-sub">{t("month_extra")}: <strong>{fmt(m_extra)}</strong></div>
-  <div class="metric-sub">{t("month_total")}: <strong>{fmt(m_total)}</strong></div>
-  <div class="metric-sub" style="margin-top:.3rem">{t("pace_ratio_label")}: <strong>{pace_r:.2f}</strong></div>
-  <div class="metric-sub"><span class="{pace_cls}"><strong>{pace_lbl}</strong></span></div>
-  <div class="metric-sub" style="margin-top:.45rem">{t("pace_tip").format(n=tgt["name"])}</div>
-</div>""", unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="card">
+      <div class="metric-label">{t("monthly_goal_label")}</div>
+      <div class="metric-value">{fmt(m_goal)}</div>
+      <div class="metric-sub" style="margin-top:.6rem">{t("month_auto")}: <strong>{fmt(m_auto)}</strong></div>
+      <div class="metric-sub">{t("month_extra")}: <strong>{fmt(m_extra)}</strong></div>
+      <div class="metric-sub">{t("month_total")}: <strong>{fmt(m_total)}</strong></div>
+      <div class="metric-sub" style="margin-top:.3rem">{t("pace_ratio_label")}: <strong>{pace_r:.2f}</strong></div>
+      <div class="metric-sub"><span class="{pace_cls}"><strong>{pace_lbl}</strong></span></div>
+      <div class="metric-sub" style="margin-top:.45rem">{t("pace_tip").format(n=tgt["name"])}</div>
+    </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════
 # History
@@ -947,14 +1015,14 @@ if not recent:
 else:
     for tx in recent:
         ts = tx.get("timestamp", "").replace("T", " ")
-        ck = tx.get("category_key", "cat_other")
+        cat = tx_category(tx)
         amr = "Amortized" if tx.get("amortized") else "Standard"
         n = tx.get("note", "").strip()
         n_html = f'<div class="tx-note">{n}</div>' if n else ""
         st.markdown(f"""
         <div class="tx-item">
           <div class="tx-top">
-            <div class="tx-cat">{t(ck)}</div>
+            <div class="tx-cat">{cat}</div>
             <div class="tx-charge">{fmt(float(tx.get("amount_charged",0)))}</div>
           </div>
           <div class="tx-meta">{ts} · {t("entered")} {fmt(float(tx.get("amount_entered",0)))} · {amr}</div>
