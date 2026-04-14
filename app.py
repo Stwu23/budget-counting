@@ -1,35 +1,235 @@
+"""
+Pulse — behavior-driven weekly budget app.
+Single-file Streamlit · JSON persistence · i18n (zh/en) · dark fintech UI.
+"""
+
+from __future__ import annotations
+
 import json
-from datetime import datetime, date
+from datetime import date, datetime
 from pathlib import Path
-from typing import Dict, List, Tuple
-from urllib import error, request
+from typing import Any
 
 import altair as alt
 import streamlit as st
 
+# ── Config ────────────────────────────────────────────────────────────────
 
-st.set_page_config(
-    page_title="Pulse Budget",
-    page_icon="💸",
-    layout="centered",
-    initial_sidebar_state="collapsed",
-)
-
+st.set_page_config(page_title="Pulse", page_icon="◉", layout="centered",
+                   initial_sidebar_state="collapsed")
 
 DATA_FILE = Path(__file__).with_name("budget_data.json")
-SUPABASE_TABLE = "app_state"
 DEFAULT_ALLOWANCE = 150.0
-CATEGORIES = [
-    "Restaurant / Food",
-    "Grocery / Supermarket",
-    "Online Shopping",
-    "Transport",
-    "Coffee / Drinks",
-    "Entertainment",
-    "School / Supplies",
-    "Other",
+
+CATEGORIES_KEY = [
+    "cat_restaurant", "cat_grocery", "cat_online", "cat_transport",
+    "cat_coffee", "cat_entertainment", "cat_school", "cat_other",
 ]
 
+# ── i18n ──────────────────────────────────────────────────────────────────
+
+LANG: dict[str, dict[str, str]] = {
+    "zh": {
+        "brand": "Pulse",
+        "remaining_week": "本周剩余",
+        "safe_today": "今日可花",
+        "days_left": "天",
+        "remaining_div_days": "剩余 ÷ 天数",
+        "burn_rate": "支出节奏",
+        "burn_vs_ideal": "与理想日节奏对比",
+        "budget_progress": "本周预算进度",
+        "pct_left": "剩余占周预算",
+        "panic_over": "Panic Mode：你已超支",
+        "settings_title": "设置",
+        "weekly_allowance": "每周额度",
+        "save_allowance": "保存额度",
+        "allowance_saved": "周额度已更新为 {v}。",
+        "target_settings": "储蓄目标设定",
+        "target_name": "目标名称",
+        "target_total": "总价",
+        "monthly_goal": "月度目标",
+        "save_target": "保存目标",
+        "target_saved_msg": "储蓄目标已保存。",
+        "log_expense": "快速记账",
+        "amount": "金额",
+        "category": "分类",
+        "note": "备注（可选）",
+        "amortize": "分期计入？仅计本周一半",
+        "add_btn": "记一笔",
+        "enter_positive": "请输入大于 $0 的金额。",
+        "logged": "已记录 {v} · {c}",
+        "amortize_msg": "仅一半计入本周，记得下周补记另一半。",
+        "undo": "撤销上一笔",
+        "undo_done": "已撤销上一笔，余额已恢复。",
+        "no_undo": "没有可撤销的记录。",
+        "new_week": "新一周",
+        "new_week_done": "已开始新一周，流水已清空，结余已计入目标。",
+        "auto_week": "新的一周已开始，预算已自动重置。",
+        "cat_restaurant": "餐厅 / 外食",
+        "cat_grocery": "超市 / 杂货",
+        "cat_online": "网购",
+        "cat_transport": "交通",
+        "cat_coffee": "咖啡 / 饮品",
+        "cat_entertainment": "娱乐",
+        "cat_school": "学习 / 文具",
+        "cat_other": "其他",
+        "category_insights": "分类洞察",
+        "no_spending": "本周尚无支出，记账后即可查看分类占比。",
+        "insight": "洞察",
+        "top_spend": "Top spend: {c} ({p}%)",
+        "top_spend_sub": "本周最大支出类别是 {c}。",
+        "target_section": "储蓄目标",
+        "completed": "已完成",
+        "projected_save": "本周预计结余",
+        "formula_save": "= max(周额度 − 已花, 0)",
+        "last_week_credit": "上周计入目标",
+        "auto_credit": "关周时自动入账",
+        "extra_deposit": "额外存入",
+        "extra_deposit_desc": "手动向目标存入（不影响周余额）",
+        "extra_note": "备注（可选）",
+        "add_deposit": "存入目标",
+        "deposit_done": "已向目标额外存入 {v}。",
+        "breakdown_auto": "自动结余",
+        "breakdown_extra": "额外存入",
+        "breakdown_total": "目标合计",
+        "target_pace": "目标节奏",
+        "monthly_goal_label": "月度目标",
+        "month_auto": "本月自动结余",
+        "month_extra": "本月额外存入",
+        "month_total": "本月合计",
+        "pace_ratio_label": "节奏比",
+        "pace_tip": "若节奏落后，适当放慢消费更有利于完成「{n}」。",
+        "history": "最近流水",
+        "no_tx": "暂无记录。",
+        "entered": "录入",
+        "burn_on": "节奏正常",
+        "burn_fast": "花得有点快",
+        "burn_early": "照此速度可能提前花完",
+        "burn_over": "已超支 — 先稳住节奏",
+        "chill": "🟢 轻松",
+        "careful": "🟡 注意",
+        "danger": "🔴 危险",
+        "panic": "🚨 超支",
+        "ahead": "🟢 领先节奏",
+        "on_track": "🟡 节奏正常",
+        "behind": "🔴 落后节奏",
+        "week_col": "周",
+        "budget_col": "额度",
+        "spent_col": "支出",
+        "saved_col": "省下",
+    },
+    "en": {
+        "brand": "Pulse",
+        "remaining_week": "Remaining This Week",
+        "safe_today": "Safe to Spend Today",
+        "days_left": "day(s)",
+        "remaining_div_days": "remaining ÷ days",
+        "burn_rate": "Burn Rate",
+        "burn_vs_ideal": "vs. ideal daily pace",
+        "budget_progress": "Budget Progress",
+        "pct_left": "of weekly budget left",
+        "panic_over": "Panic Mode: You are over budget by",
+        "settings_title": "Settings",
+        "weekly_allowance": "Weekly Allowance",
+        "save_allowance": "Save Allowance",
+        "allowance_saved": "Weekly allowance updated to {v}.",
+        "target_settings": "Target Settings",
+        "target_name": "Target Name",
+        "target_total": "Total Price",
+        "monthly_goal": "Monthly Goal",
+        "save_target": "Save Target",
+        "target_saved_msg": "Savings target saved.",
+        "log_expense": "Log Expense",
+        "amount": "Amount",
+        "category": "Category",
+        "note": "Note (optional)",
+        "amortize": "Amortize? Count only half this week",
+        "add_btn": "Add Expense",
+        "enter_positive": "Enter an amount greater than $0.",
+        "logged": "Logged {v} · {c}",
+        "amortize_msg": "Only half counted this week. Remember to log the other half next week.",
+        "undo": "Undo Last",
+        "undo_done": "Last transaction removed, balance restored.",
+        "no_undo": "No transactions to undo.",
+        "new_week": "New Week",
+        "new_week_done": "New week started. Savings credited to target.",
+        "auto_week": "New week detected — budget reset automatically.",
+        "cat_restaurant": "Restaurant / Food",
+        "cat_grocery": "Grocery / Supermarket",
+        "cat_online": "Online Shopping",
+        "cat_transport": "Transport",
+        "cat_coffee": "Coffee / Drinks",
+        "cat_entertainment": "Entertainment",
+        "cat_school": "School / Supplies",
+        "cat_other": "Other",
+        "category_insights": "Category Insights",
+        "no_spending": "No spending logged yet this week.",
+        "insight": "Insight",
+        "top_spend": "Top spend: {c} ({p}%)",
+        "top_spend_sub": "Your largest spend area this week is {c}.",
+        "target_section": "Savings Target",
+        "completed": "completed",
+        "projected_save": "Projected Savings",
+        "formula_save": "= max(allowance − spent, 0)",
+        "last_week_credit": "Last Week Credit",
+        "auto_credit": "Auto-credited on week close",
+        "extra_deposit": "Extra Deposit",
+        "extra_deposit_desc": "Add money to target (does not affect weekly balance)",
+        "extra_note": "Note (optional)",
+        "add_deposit": "Add to Target",
+        "deposit_done": "Added {v} to target.",
+        "breakdown_auto": "Auto Saved",
+        "breakdown_extra": "Extra Deposits",
+        "breakdown_total": "Total Saved",
+        "target_pace": "Target Pace",
+        "monthly_goal_label": "Monthly Goal",
+        "month_auto": "Auto saved this month",
+        "month_extra": "Extra deposits this month",
+        "month_total": "Total this month",
+        "pace_ratio_label": "Pace ratio",
+        "pace_tip": "Slow down spending to stay on track for \"{n}\".",
+        "history": "History",
+        "no_tx": "No transactions yet.",
+        "entered": "Entered",
+        "burn_on": "On track",
+        "burn_fast": "Spending a bit fast",
+        "burn_early": "At this pace you may run out early",
+        "burn_over": "Over budget — hold steady",
+        "chill": "🟢 Chill",
+        "careful": "🟡 Careful",
+        "danger": "🔴 Danger",
+        "panic": "🚨 Panic Mode",
+        "ahead": "🟢 Ahead of pace",
+        "on_track": "🟡 On track",
+        "behind": "🔴 Behind pace",
+        "week_col": "Week",
+        "budget_col": "Budget",
+        "spent_col": "Spent",
+        "saved_col": "Saved",
+    },
+}
+
+
+def t(key: str) -> str:
+    lang = st.session_state.get("lang", "zh")
+    return LANG.get(lang, LANG["zh"]).get(key, key)
+
+
+def cat_labels() -> list[str]:
+    return [t(k) for k in CATEGORIES_KEY]
+
+
+def cat_key_from_label(label: str) -> str:
+    """Persist the i18n-independent key, not the display label."""
+    lang = st.session_state.get("lang", "zh")
+    d = LANG.get(lang, LANG["zh"])
+    for k in CATEGORIES_KEY:
+        if d.get(k) == label:
+            return k
+    return "cat_other"
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────
 
 def current_week_id(today: date | None = None) -> str:
     d = today or date.today()
@@ -37,185 +237,13 @@ def current_week_id(today: date | None = None) -> str:
     return f"{iso.year}-W{iso.week:02d}"
 
 
-def default_data() -> Dict:
-    return {
-        "weekly_allowance": DEFAULT_ALLOWANCE,
-        "current_week_id": current_week_id(),
-        "remaining_balance": DEFAULT_ALLOWANCE,
-        "transactions": [],
-        "weekly_history": [],
-    }
+def current_month_key(today: date | None = None) -> str:
+    d = today or date.today()
+    return f"{d.year}-{d.month:02d}"
 
 
-def normalize_data(raw: Dict) -> Dict:
-    baseline = default_data()
-    baseline.update(raw or {})
-    baseline["weekly_allowance"] = float(baseline.get("weekly_allowance", DEFAULT_ALLOWANCE))
-    baseline["remaining_balance"] = float(baseline.get("remaining_balance", baseline["weekly_allowance"]))
-    baseline["transactions"] = list(baseline.get("transactions", []))
-    baseline["weekly_history"] = list(baseline.get("weekly_history", []))
-    return baseline
-
-
-def load_data_local() -> Dict:
-    if not DATA_FILE.exists():
-        data = default_data()
-        save_data_local(data)
-        return data
-    try:
-        with DATA_FILE.open("r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        data = default_data()
-        save_data_local(data)
-        return data
-
-    return normalize_data(data)
-
-
-def save_data_local(data: Dict) -> None:
-    with DATA_FILE.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def get_storage_backend() -> Dict[str, str]:
-    try:
-        supabase_conf = st.secrets.get("supabase", {})
-    except Exception:
-        supabase_conf = {}
-
-    url = str(supabase_conf.get("url", "")).strip()
-    key = str(supabase_conf.get("service_role_key") or supabase_conf.get("anon_key") or "").strip()
-    if url and key:
-        return {"mode": "supabase", "url": url.rstrip("/"), "key": key}
-    return {"mode": "local"}
-
-
-def supabase_request(
-    method: str,
-    endpoint: str,
-    *,
-    key: str,
-    payload: Dict | List | None = None,
-    query: str = "",
-):
-    body = None
-    if payload is not None:
-        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-
-    req = request.Request(
-        f"{endpoint}{query}",
-        data=body,
-        method=method,
-        headers={
-            "apikey": key,
-            "Authorization": f"Bearer {key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        },
-    )
-    try:
-        with request.urlopen(req, timeout=12) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"Supabase HTTP {exc.code}: {detail}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"Supabase request failed: {exc.reason}") from exc
-
-
-def load_data_supabase(backend: Dict[str, str]) -> Dict:
-    query = f"?id=eq.default&select=payload"
-    endpoint = f"{backend['url']}/rest/v1/{SUPABASE_TABLE}"
-    rows = supabase_request("GET", endpoint, key=backend["key"], query=query)
-
-    if not rows:
-        data = default_data()
-        save_data_supabase(data, backend)
-        return data
-
-    payload = rows[0].get("payload", {}) if isinstance(rows, list) else {}
-    return normalize_data(payload)
-
-
-def save_data_supabase(data: Dict, backend: Dict[str, str]) -> None:
-    endpoint = f"{backend['url']}/rest/v1/{SUPABASE_TABLE}"
-    payload = [
-        {
-            "id": "default",
-            "payload": data,
-            "updated_at": datetime.now().isoformat(timespec="seconds"),
-        }
-    ]
-    query = "?on_conflict=id"
-    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-    req = request.Request(
-        f"{endpoint}{query}",
-        data=body,
-        method="POST",
-        headers={
-            "apikey": backend["key"],
-            "Authorization": f"Bearer {backend['key']}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
-    )
-    try:
-        with request.urlopen(req, timeout=12):
-            return
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="ignore")
-        raise RuntimeError(f"Supabase HTTP {exc.code}: {detail}") from exc
-    except error.URLError as exc:
-        raise RuntimeError(f"Supabase request failed: {exc.reason}") from exc
-
-
-def load_data_with_fallback(backend: Dict[str, str]) -> Tuple[Dict, str, str]:
-    if backend["mode"] == "supabase":
-        try:
-            return load_data_supabase(backend), "supabase", ""
-        except Exception as exc:
-            data = load_data_local()
-            return data, "local", str(exc)
-    return load_data_local(), "local", ""
-
-
-def save_data(data: Dict, backend: Dict[str, str]) -> None:
-    if backend["mode"] == "supabase":
-        try:
-            save_data_supabase(data, backend)
-            return
-        except Exception:
-            save_data_local(data)
-            return
-    save_data_local(data)
-
-
-def start_new_week(data: Dict, new_week_id: str) -> None:
-    existing_transactions = data.get("transactions", [])
-    if existing_transactions:
-        data.setdefault("weekly_history", []).append(
-            {
-                "week_id": data.get("current_week_id", current_week_id()),
-                "transactions": existing_transactions,
-                "remaining_balance": data.get("remaining_balance", data["weekly_allowance"]),
-                "archived_at": datetime.now().isoformat(timespec="seconds"),
-            }
-        )
-    data["current_week_id"] = new_week_id
-    data["remaining_balance"] = float(data["weekly_allowance"])
-    data["transactions"] = []
-
-
-def ensure_week_is_current(data: Dict, backend: Dict[str, str]) -> bool:
-    today_week = current_week_id()
-    if data.get("current_week_id") != today_week:
-        start_new_week(data, today_week)
-        save_data(data, backend)
-        return True
-    return False
+def fmt(v: float) -> str:
+    return f"${v:,.2f}"
 
 
 def days_left_in_week(today: date | None = None) -> int:
@@ -223,584 +251,621 @@ def days_left_in_week(today: date | None = None) -> int:
     return max(1, 7 - d.weekday())
 
 
-def format_money(value: float) -> str:
-    return f"${value:,.2f}"
+# ── Data model ────────────────────────────────────────────────────────────
+
+def _default_target() -> dict[str, Any]:
+    return {"name": "MacBook Pro", "total": 3600.0,
+            "auto_saved": 0.0, "extra_total": 0.0, "monthly_goal": 300.0}
 
 
-def status_state(remaining: float, allowance: float) -> Tuple[str, str]:
-    if remaining < 0:
-        return "🚨 Panic Mode", "panic"
-    ratio = 0 if allowance <= 0 else remaining / allowance
-    if ratio > 0.5:
-        return "🟢 Chill", "chill"
-    if ratio >= 0.2:
-        return "🟡 Careful", "careful"
-    return "🔴 Danger", "danger"
+def _default_data() -> dict[str, Any]:
+    return {
+        "lang": "zh",
+        "weekly_allowance": DEFAULT_ALLOWANCE,
+        "current_week_id": current_week_id(),
+        "remaining_balance": DEFAULT_ALLOWANCE,
+        "transactions": [],
+        "target": _default_target(),
+        "extra_deposits": [],
+        "weekly_savings_log": [],
+        "monthly_auto_saved": {},
+        "monthly_extra_deposits": {},
+    }
 
 
-def burn_rate_message(remaining: float, allowance: float, days_left: int) -> str:
-    if remaining < 0:
-        return "At this pace, you are already over budget."
+def _normalize(raw: dict[str, Any]) -> dict[str, Any]:
+    base = _default_data()
+    base.update(raw or {})
+    base["lang"] = str(base.get("lang", "zh"))
+    base["weekly_allowance"] = float(base.get("weekly_allowance", DEFAULT_ALLOWANCE))
+    base["remaining_balance"] = float(base.get("remaining_balance", base["weekly_allowance"]))
+    base["transactions"] = list(base.get("transactions", []))
 
-    ideal_remaining = (allowance / 7.0) * days_left
-    if remaining >= ideal_remaining * 1.05:
-        return "You are on track."
-    if remaining >= ideal_remaining * 0.8:
-        return "Spending a little fast."
-    return "At this pace, you may run out early."
+    tgt = base.get("target") or {}
+    dt = _default_target()
+    dt.update(tgt)
+    dt["total"] = float(dt.get("total", 3600))
+    dt["auto_saved"] = float(dt.get("auto_saved", dt.get("saved", 0)))
+    dt["extra_total"] = float(dt.get("extra_total", 0))
+    dt["monthly_goal"] = float(dt.get("monthly_goal", 300))
+    dt["name"] = str(dt.get("name", "My Goal")).strip() or "My Goal"
+    base["target"] = dt
 
-
-def category_summary(transactions: List[Dict]) -> Tuple[Dict[str, float], float]:
-    summary = {category: 0.0 for category in CATEGORIES}
-    total = 0.0
-    for tx in transactions:
-        charged = float(tx.get("amount_charged", 0))
-        category = tx.get("category", "Other")
-        if category not in summary:
-            summary[category] = 0.0
-        summary[category] += charged
-        total += charged
-    summary = {k: v for k, v in summary.items() if v > 0}
-    return summary, total
-
-
-st.markdown(
-    """
-    <style>
-        :root {
-            --bg: #eee1ce;
-            --card: #fffdfa;
-            --card-soft: #f8f1e6;
-            --text: #2f2922;
-            --muted: #7e7264;
-            --border: rgba(73, 58, 39, 0.12);
-            --green: #4f8a5f;
-            --yellow: #c89d4f;
-            --red: #bb5d4a;
-            --accent: #9c7651;
-        }
-        html, body, [data-testid="stAppViewContainer"], .main {
-            background: var(--bg) !important;
-        }
-        .stApp {
-            background: radial-gradient(1100px 450px at 95% -10%, #d7be9f 0%, var(--bg) 58%);
-            color: var(--text);
-        }
-        header[data-testid="stHeader"] {
-            background: transparent;
-            height: 0;
-        }
-        [data-testid="stToolbar"], #MainMenu, footer {
-            visibility: hidden;
-            height: 0;
-            position: fixed;
-        }
-        .block-container {
-            padding-top: 0.45rem;
-            padding-bottom: 2rem;
-            max-width: 780px;
-        }
-        .card {
-            background: linear-gradient(180deg, #fffefc 0%, var(--card) 100%);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 1rem 1.05rem;
-            box-shadow: 0 10px 24px rgba(93, 74, 51, 0.10);
-            margin-bottom: 0.8rem;
-        }
-        .hero-card {
-            padding: 1.2rem 1.1rem;
-            border-radius: 24px;
-            background: linear-gradient(145deg, #fffaf3 0%, #fffdf9 100%);
-            border: 1px solid rgba(111, 84, 54, 0.16);
-        }
-        .brand {
-            font-size: 0.95rem;
-            letter-spacing: 0.07em;
-            text-transform: uppercase;
-            color: var(--muted);
-            margin-bottom: 0.2rem;
-            font-weight: 600;
-        }
-        .hero-label {
-            color: #75695d;
-            font-size: 0.95rem;
-        }
-        .hero-amount {
-            font-size: clamp(2rem, 7.8vw, 3.25rem);
-            line-height: 1.1;
-            font-weight: 750;
-            margin: 0.3rem 0 0.45rem 0;
-            letter-spacing: -0.02em;
-            animation: fadeup 0.45s ease;
-        }
-        .state-pill {
-            display: inline-flex;
-            align-items: center;
-            border-radius: 999px;
-            padding: 0.35rem 0.72rem;
-            font-size: 0.82rem;
-            border: 1px solid transparent;
-            font-weight: 600;
-        }
-        .chill { background: rgba(79, 138, 95, 0.12); color: #3f7650; border-color: rgba(79, 138, 95, 0.28); }
-        .careful { background: rgba(200, 157, 79, 0.14); color: #8f6b2f; border-color: rgba(200, 157, 79, 0.30); }
-        .danger, .panic { background: rgba(187, 93, 74, 0.14); color: #8a4337; border-color: rgba(187, 93, 74, 0.30); }
-        .metric-label { color: var(--muted); font-size: 0.86rem; margin-bottom: 0.2rem; }
-        .metric-value { font-size: 1.55rem; font-weight: 700; margin-bottom: 0.1rem; }
-        .metric-sub { color: #6f655a; font-size: 0.82rem; }
-        .section-title {
-            font-size: 1.02rem;
-            color: #4a3f34;
-            font-weight: 680;
-            margin: 0.75rem 0 0.5rem 0.1rem;
-        }
-        .small-muted { color: var(--muted); font-size: 0.78rem; margin-top: 0.18rem; }
-        .progress-track {
-            width: 100%;
-            height: 12px;
-            border-radius: 999px;
-            background: rgba(90, 70, 48, 0.12);
-            overflow: hidden;
-            margin: 0.45rem 0 0.2rem 0;
-        }
-        .progress-fill {
-            height: 100%;
-            border-radius: 999px;
-            transition: width 0.3s ease;
-        }
-        .bar-row { margin: 0.48rem 0 0.72rem 0; }
-        .bar-head {
-            display: flex; justify-content: space-between; gap: 0.8rem;
-            font-size: 0.86rem; margin-bottom: 0.28rem; color: #5f5448;
-        }
-        .mini-track {
-            width: 100%; height: 8px; border-radius: 999px;
-            background: rgba(90, 70, 48, 0.12); overflow: hidden;
-        }
-        .mini-fill {
-            height: 100%;
-            border-radius: 999px;
-            background: linear-gradient(90deg, #b78b5a, #8f6b44);
-        }
-        .tx-item {
-            background: var(--card-soft);
-            border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 0.72rem 0.82rem;
-            margin-bottom: 0.45rem;
-        }
-        .tx-top { display: flex; justify-content: space-between; gap: 0.8rem; align-items: center; }
-        .tx-cat { font-weight: 620; font-size: 0.91rem; }
-        .tx-charge { font-size: 0.95rem; font-weight: 700; }
-        .tx-meta { color: var(--muted); font-size: 0.77rem; margin-top: 0.17rem; }
-        .tx-note { color: #61574c; font-size: 0.81rem; margin-top: 0.2rem; }
-        div[data-testid="stForm"] {
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 20px;
-            padding: 0.95rem 0.95rem 0.35rem 0.95rem;
-            margin-bottom: 0.7rem;
-        }
-        .stButton > button, .stFormSubmitButton > button {
-            border-radius: 12px;
-            border: 1px solid rgba(90, 70, 48, 0.2);
-            background: #fffaf3;
-            color: #3f342a;
-            min-height: 2.75rem;
-            font-weight: 620;
-        }
-        div[data-baseweb="input"] input, div[data-baseweb="select"] > div {
-            min-height: 2.7rem;
-            font-size: 1rem;
-            background: #fffefb;
-        }
-        .floating-fab {
-            position: fixed;
-            right: 1rem;
-            bottom: calc(0.8rem + env(safe-area-inset-bottom));
-            z-index: 999;
-            background: linear-gradient(135deg, #b88958, #9c7651);
-            color: #fffdf8 !important;
-            border-radius: 999px;
-            padding: 0.68rem 1rem;
-            font-weight: 700;
-            text-decoration: none !important;
-            box-shadow: 0 12px 24px rgba(87, 64, 40, 0.26);
-        }
-        .app-tabs [data-baseweb="tab-list"] {
-            gap: 0.25rem;
-            padding-bottom: 0.35rem;
-        }
-        .app-tabs button[role="tab"] {
-            border-radius: 999px;
-            background: rgba(103, 81, 56, 0.08);
-        }
-        @keyframes fadeup {
-            from { transform: translateY(7px); opacity: 0.15; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-        @media (max-width: 640px) {
-            .block-container { padding-top: 0.3rem; padding-left: 0.7rem; padding-right: 0.7rem; padding-bottom: calc(2.5rem + env(safe-area-inset-bottom)); }
-            .hero-card { border-radius: 20px; }
-            .card { border-radius: 16px; }
-            .hero-amount { font-size: 2.35rem; }
-            .floating-fab { right: 0.75rem; bottom: calc(0.7rem + env(safe-area-inset-bottom)); padding: 0.65rem 0.95rem; }
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+    base["extra_deposits"] = list(base.get("extra_deposits", []))
+    base["weekly_savings_log"] = list(base.get("weekly_savings_log", []))
+    base["monthly_auto_saved"] = dict(base.get("monthly_auto_saved", base.get("monthly_saved", {})))
+    base["monthly_extra_deposits"] = dict(base.get("monthly_extra_deposits", {}))
+    return base
 
 
-storage_backend = get_storage_backend()
-data, active_storage_mode, storage_error = load_data_with_fallback(storage_backend)
-active_backend = storage_backend if active_storage_mode == "supabase" else {"mode": "local"}
+def load_data() -> dict[str, Any]:
+    if not DATA_FILE.exists():
+        d = _default_data()
+        save_data(d)
+        return d
+    try:
+        with DATA_FILE.open("r", encoding="utf-8") as f:
+            d = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        d = _default_data()
+        save_data(d)
+        return d
+    return _normalize(d)
 
-if ensure_week_is_current(data, active_backend):
-    st.session_state["flash_info"] = "New week detected. Budget has been reset automatically."
+
+def save_data(d: dict[str, Any]) -> None:
+    with DATA_FILE.open("w", encoding="utf-8") as f:
+        json.dump(d, f, indent=2, ensure_ascii=False)
+
+
+def sum_charged(txs: list[dict]) -> float:
+    return round(sum(float(x.get("amount_charged", 0)) for x in txs), 2)
+
+
+def _credit_week(data: dict, week_id: str, txs: list[dict], allow: float) -> float:
+    spent = sum_charged(txs)
+    saved = max(round(allow - spent, 2), 0.0)
+    data["target"]["auto_saved"] = round(data["target"]["auto_saved"] + saved, 2)
+
+    mk = current_month_key()
+    data["monthly_auto_saved"][mk] = round(
+        float(data["monthly_auto_saved"].get(mk, 0)) + saved, 2)
+
+    log = data["weekly_savings_log"]
+    log.append({"week_id": week_id, "budget": round(allow, 2),
+                "spent": spent, "saved": saved,
+                "closed_at": datetime.now().isoformat(timespec="seconds")})
+    data["weekly_savings_log"] = log[-24:]
+    return saved
+
+
+def start_new_week(data: dict, new_wk: str) -> None:
+    old_id = data.get("current_week_id", current_week_id())
+    old_tx = list(data.get("transactions", []))
+    allow = float(data.get("weekly_allowance", DEFAULT_ALLOWANCE))
+    rem = float(data.get("remaining_balance", allow))
+
+    if old_id != new_wk:
+        _credit_week(data, old_id, old_tx, allow)
+    elif old_tx or abs(rem - allow) > 0.02:
+        _credit_week(data, old_id, old_tx, allow)
+
+    data["current_week_id"] = new_wk
+    data["remaining_balance"] = round(allow, 2)
+    data["transactions"] = []
+
+
+def ensure_week_current(data: dict) -> bool:
+    wk = current_week_id()
+    if data.get("current_week_id") != wk:
+        start_new_week(data, wk)
+        save_data(data)
+        return True
+    return False
+
+
+def status_state(rem: float, allow: float) -> tuple[str, str]:
+    if rem < 0:
+        return t("panic"), "panic"
+    if allow <= 0:
+        return t("danger"), "danger"
+    r = rem / allow
+    if r > 0.6:
+        return t("chill"), "chill"
+    if r >= 0.3:
+        return t("careful"), "careful"
+    return t("danger"), "danger"
+
+
+def progress_style(rem: float, allow: float) -> tuple[float, str]:
+    if allow <= 0:
+        return 0.0, "#f87171"
+    pct = max(0.0, min(100.0, rem / allow * 100))
+    if pct > 50:
+        return pct, "#34d399"
+    if pct >= 20:
+        return pct, "#fbbf24"
+    return pct, "#f87171"
+
+
+def burn_msg(rem: float, allow: float, dl: int) -> str:
+    if rem < 0:
+        return t("burn_over")
+    ideal = (allow / 7.0) * dl
+    if rem >= ideal * 1.05:
+        return t("burn_on")
+    if rem >= ideal * 0.8:
+        return t("burn_fast")
+    return t("burn_early")
+
+
+def cat_summary(txs: list[dict]) -> tuple[dict[str, float], float]:
+    s: dict[str, float] = {}
+    tot = 0.0
+    for tx in txs:
+        ch = float(tx.get("amount_charged", 0))
+        k = tx.get("category_key", "cat_other")
+        s[k] = s.get(k, 0) + ch
+        tot += ch
+    return {k: v for k, v in s.items() if v > 0}, tot
+
+
+def pace_status(ratio: float) -> tuple[str, str]:
+    if ratio > 1.1:
+        return t("ahead"), "pace-ahead"
+    if ratio >= 0.8:
+        return t("on_track"), "pace-ok"
+    return t("behind"), "pace-behind"
+
+
+# ── CSS (dark fintech) ───────────────────────────────────────────────────
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap');
+:root{
+  --bg0:#0c0e12;--bg1:#12151c;--card:#161a22;--card2:#1b202a;
+  --stroke:rgba(255,255,255,.08);--text:#e8eaef;--muted:#9aa3b2;
+  --accent:#5eead4;--accent2:#38bdf8;
+}
+html,body,[data-testid="stAppViewContainer"],.stApp,.main{
+  background:
+    radial-gradient(1200px 600px at 80% -20%,rgba(56,189,248,.08),transparent 55%),
+    radial-gradient(900px 500px at 10% 0%,rgba(94,234,212,.07),transparent 50%),
+    linear-gradient(180deg,var(--bg0),var(--bg1))!important;
+  color:var(--text);font-family:'DM Sans',system-ui,sans-serif;
+}
+header[data-testid="stHeader"]{background:transparent}
+[data-testid="stToolbar"],#MainMenu{visibility:hidden;height:0}
+.block-container{padding-top:.55rem;padding-bottom:calc(2rem + env(safe-area-inset-bottom));max-width:520px}
+
+.pulse-brand{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:.35rem}
+.card{background:linear-gradient(145deg,var(--card),var(--card2));border:1px solid var(--stroke);border-radius:20px;padding:1rem 1.05rem;margin-bottom:.75rem;box-shadow:0 18px 40px rgba(0,0,0,.35)}
+.hero-card{padding:1.15rem 1.1rem 1.05rem;border-radius:22px;background:linear-gradient(160deg,#1a1f29,#141821);border:1px solid rgba(94,234,212,.12)}
+.hero-label{color:var(--muted);font-size:.92rem;font-weight:500}
+.hero-amount{font-size:clamp(2.1rem,9vw,3.1rem);line-height:1.08;font-weight:700;margin:.35rem 0 .55rem;letter-spacing:-.03em;background:linear-gradient(90deg,#f8fafc,#cbd5e1);-webkit-background-clip:text;background-clip:text;color:transparent}
+
+.state-pill{display:inline-flex;align-items:center;border-radius:999px;padding:.38rem .78rem;font-size:.82rem;font-weight:600;border:1px solid transparent}
+.chill{background:rgba(52,211,153,.12);color:#6ee7b7;border-color:rgba(52,211,153,.28)}
+.careful{background:rgba(251,191,36,.12);color:#fcd34d;border-color:rgba(251,191,36,.28)}
+.danger{background:rgba(248,113,113,.12);color:#fca5a5;border-color:rgba(248,113,113,.26)}
+.panic{background:rgba(248,113,113,.18);color:#fecaca;border-color:rgba(248,113,113,.35)}
+
+.metric-label{color:var(--muted);font-size:.82rem;margin-bottom:.2rem;font-weight:500}
+.metric-value{font-size:1.45rem;font-weight:700;letter-spacing:-.02em}
+.metric-sub{color:#8b95a8;font-size:.78rem;margin-top:.15rem;line-height:1.35}
+
+.section-title{font-size:.78rem;letter-spacing:.16em;text-transform:uppercase;color:#7c869a;font-weight:600;margin:1rem 0 .45rem .15rem}
+
+.progress-track{width:100%;height:10px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden;margin:.4rem 0 .15rem}
+.progress-fill{height:100%;border-radius:999px;transition:width .35s ease}
+
+.bar-row{margin:.42rem 0 .65rem}
+.bar-head{display:flex;justify-content:space-between;gap:.6rem;font-size:.82rem;margin-bottom:.22rem;color:#b4bcc9}
+.mini-track{width:100%;height:7px;border-radius:999px;background:rgba(255,255,255,.06);overflow:hidden}
+.mini-fill{height:100%;border-radius:999px;background:linear-gradient(90deg,var(--accent2),var(--accent))}
+
+.tx-item{background:rgba(255,255,255,.03);border:1px solid var(--stroke);border-radius:14px;padding:.72rem .82rem;margin-bottom:.42rem}
+.tx-top{display:flex;justify-content:space-between;gap:.8rem;align-items:center}
+.tx-cat{font-weight:600;font-size:.9rem}
+.tx-charge{font-size:.95rem;font-weight:700;color:#f1f5f9}
+.tx-meta{color:var(--muted);font-size:.74rem;margin-top:.15rem}
+.tx-note{color:#aeb6c5;font-size:.8rem;margin-top:.2rem}
+
+div[data-testid="stForm"]{background:linear-gradient(145deg,var(--card),#151922);border:1px solid var(--stroke);border-radius:18px;padding:.9rem .9rem .25rem;margin-bottom:.65rem}
+.stButton>button,.stFormSubmitButton>button{border-radius:14px!important;border:1px solid rgba(255,255,255,.12)!important;background:linear-gradient(180deg,#1f2633,#1a202b)!important;color:#e8eaef!important;min-height:2.85rem;font-weight:600;font-size:.95rem}
+.stButton>button:hover{border-color:rgba(94,234,212,.35)!important}
+
+div[data-baseweb="input"] input,div[data-baseweb="textarea"] textarea{background:#0f1218!important;color:#e8eaef!important;border-radius:12px!important;border:1px solid rgba(255,255,255,.1)!important;min-height:2.75rem;font-size:1.05rem}
+div[data-baseweb="select"]>div{background:#0f1218!important;border-radius:12px!important;min-height:2.75rem;border:1px solid rgba(255,255,255,.1)!important}
+
+div[data-testid="stNotification"],.stAlert{background:rgba(15,18,24,.92)!important;border:1px solid rgba(255,255,255,.08)!important;border-radius:14px!important}
+.streamlit-expanderHeader{font-weight:600!important;color:#cbd5e1!important}
+[data-testid="stMarkdownContainer"] table{width:100%;border-collapse:collapse;font-size:.82rem}
+[data-testid="stMarkdownContainer"] th,[data-testid="stMarkdownContainer"] td{border-bottom:1px solid rgba(255,255,255,.08);padding:.45rem .35rem;text-align:left}
+[data-testid="stMarkdownContainer"] th{color:var(--muted);font-weight:600}
+
+.pace-ahead{color:#6ee7b7}.pace-ok{color:#fcd34d}.pace-behind{color:#fca5a5}
+
+.lang-toggle{display:flex;gap:.35rem;justify-content:flex-end;margin-bottom:.1rem}
+.lang-btn{font-size:.78rem;padding:.28rem .62rem;border-radius:999px;border:1px solid rgba(255,255,255,.15);background:transparent;color:var(--muted);cursor:pointer;font-weight:600}
+.lang-btn.active{background:rgba(94,234,212,.12);color:#5eead4;border-color:rgba(94,234,212,.35)}
+
+@media(max-width:640px){.block-container{padding-left:.75rem;padding-right:.75rem}}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Load data & language ──────────────────────────────────────────────────
+
+data = load_data()
+
+if "lang" not in st.session_state:
+    st.session_state["lang"] = data.get("lang", "zh")
+
+# Language toggle — top-right
+lc1, lc2 = st.columns([4, 1])
+with lc2:
+    cur_lang = st.session_state["lang"]
+    labels = {"zh": "中文", "en": "EN"}
+    options = list(labels.keys())
+    sel = st.segmented_control("", options, default=cur_lang,
+                               format_func=lambda x: labels[x],
+                               key="lang_toggle", label_visibility="collapsed")
+    if sel and sel != cur_lang:
+        st.session_state["lang"] = sel
+        data["lang"] = sel
+        save_data(data)
+        st.rerun()
+
+# Auto-week
+if ensure_week_current(data):
+    st.session_state["flash_info"] = t("auto_week")
+
+# Ensure numeric
 data["weekly_allowance"] = float(data.get("weekly_allowance", DEFAULT_ALLOWANCE))
 data["remaining_balance"] = float(data.get("remaining_balance", data["weekly_allowance"]))
 
-
+# Flash messages
 if "flash_info" in st.session_state:
     st.info(st.session_state.pop("flash_info"))
 if "flash_success" in st.session_state:
     st.success(st.session_state.pop("flash_success"))
-if storage_error:
-    st.warning("Supabase unavailable now. The app is temporarily using local JSON storage.")
 
-if active_storage_mode == "supabase":
-    st.caption("Storage: Supabase cloud database")
-else:
-    st.caption("Storage: Local JSON file")
+# ── Computed values ───────────────────────────────────────────────────────
 
+allow = data["weekly_allowance"]
+rem = data["remaining_balance"]
+spent_wk = sum_charged(data["transactions"])
+dl = days_left_in_week()
+safe = rem / dl
+st_label, st_class = status_state(rem, allow)
+burn = burn_msg(rem, allow, dl)
+prog_pct, prog_color = progress_style(rem, allow)
 
-allowance = data["weekly_allowance"]
-remaining = data["remaining_balance"]
-days_left = days_left_in_week()
-safe_today = remaining / days_left
-state_label, state_class = status_state(remaining, allowance)
-burn_msg = burn_rate_message(remaining, allowance, days_left)
+tgt = data["target"]
+tgt_total = float(tgt["total"])
+tgt_auto = float(tgt["auto_saved"])
+tgt_extra = float(tgt["extra_total"])
+tgt_saved = round(tgt_auto + tgt_extra, 2)
+tgt_pct = max(0.0, min(100.0, (tgt_saved / tgt_total * 100) if tgt_total > 0 else 0))
+m_goal = float(tgt["monthly_goal"])
 
-if remaining > allowance * 0.5:
-    progress_color = "#5f9b6e"
-elif remaining >= allowance * 0.2:
-    progress_color = "#c99f56"
-else:
-    progress_color = "#ba6a58"
-progress_pct = max(0.0, min(100.0, (remaining / allowance * 100.0) if allowance > 0 else 0.0))
+mk = current_month_key()
+m_auto = float(data["monthly_auto_saved"].get(mk, 0))
+m_extra = float(data["monthly_extra_deposits"].get(mk, 0))
+m_total = round(m_auto + m_extra, 2)
+pace_r = m_total / m_goal if m_goal > 0 else 0
+pace_lbl, pace_cls = pace_status(pace_r)
 
-st.markdown(
-    f"""
-    <div class="card hero-card">
-        <div class="brand">Pulse Budget</div>
-        <div class="hero-label">Remaining This Week</div>
-        <div class="hero-amount">{format_money(remaining)}</div>
-        <span class="state-pill {state_class}">{state_label}</span>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+proj_save = max(round(allow - spent_wk, 2), 0.0)
+last_wk_save = 0.0
+if data["weekly_savings_log"]:
+    last_wk_save = float(data["weekly_savings_log"][-1].get("saved", 0))
 
-with st.expander("Weekly Allowance Settings", expanded=False):
-    st.markdown('<div class="small-muted">Adjust your weekly cap without losing this week\'s spending history.</div>', unsafe_allow_html=True)
-    new_allowance = st.number_input(
-        "Weekly Allowance",
-        min_value=1.0,
-        value=float(data["weekly_allowance"]),
-        step=5.0,
-        format="%.2f",
-        key="allowance_input",
-    )
-    if st.button("Save Weekly Allowance", use_container_width=True):
-        old_allowance = float(data["weekly_allowance"])
-        spent_so_far = old_allowance - float(data["remaining_balance"])
-        data["weekly_allowance"] = round(float(new_allowance), 2)
-        data["remaining_balance"] = round(data["weekly_allowance"] - spent_so_far, 2)
-        save_data(data, active_backend)
-        st.session_state["flash_success"] = (
-            f"Weekly allowance updated to {format_money(data['weekly_allowance'])}."
-        )
+# ── HERO ──────────────────────────────────────────────────────────────────
+
+st.markdown(f"""
+<div class="card hero-card">
+  <div class="pulse-brand">{t("brand")}</div>
+  <div class="hero-label">{t("remaining_week")}</div>
+  <div class="hero-amount">{fmt(rem)}</div>
+  <span class="state-pill {st_class}">{st_label}</span>
+</div>
+""", unsafe_allow_html=True)
+
+cA, cB = st.columns(2, gap="small")
+with cA:
+    st.markdown(f"""
+    <div class="card">
+      <div class="metric-label">{t("safe_today")}</div>
+      <div class="metric-value">{fmt(safe)}</div>
+      <div class="metric-sub">{dl} {t("days_left")} · {t("remaining_div_days")}</div>
+    </div>""", unsafe_allow_html=True)
+with cB:
+    st.markdown(f"""
+    <div class="card">
+      <div class="metric-label">{t("burn_rate")}</div>
+      <div class="metric-value" style="font-size:1.05rem;line-height:1.25">{burn}</div>
+      <div class="metric-sub">{t("burn_vs_ideal")}</div>
+    </div>""", unsafe_allow_html=True)
+
+st.markdown(f"""
+<div class="card">
+  <div class="metric-label">{t("budget_progress")}</div>
+  <div class="progress-track"><div class="progress-fill" style="width:{prog_pct:.1f}%;background:{prog_color}"></div></div>
+  <div class="metric-sub">{prog_pct:.0f}% {t("pct_left")}</div>
+</div>""", unsafe_allow_html=True)
+
+if rem < 0:
+    st.error(f"{t('panic_over')} {fmt(abs(rem))}")
+
+# ── Settings (collapsible) ───────────────────────────────────────────────
+
+with st.expander(t("settings_title"), expanded=False):
+    new_a = st.number_input(t("weekly_allowance"), min_value=1.0,
+                            value=float(data["weekly_allowance"]),
+                            step=5.0, format="%.2f")
+    if st.button(t("save_allowance"), use_container_width=True):
+        old_a = float(data["weekly_allowance"])
+        spent_so = round(old_a - float(data["remaining_balance"]), 2)
+        data["weekly_allowance"] = round(float(new_a), 2)
+        data["remaining_balance"] = round(data["weekly_allowance"] - spent_so, 2)
+        save_data(data)
+        st.session_state["flash_success"] = t("allowance_saved").format(v=fmt(data["weekly_allowance"]))
         st.rerun()
 
-with st.expander("Backup & Restore", expanded=False):
-    st.markdown(
-        '<div class="small-muted">Download a full backup anytime, then restore from JSON when needed.</div>',
-        unsafe_allow_html=True,
-    )
-    backup_payload = json.dumps(data, indent=2, ensure_ascii=False)
-    st.download_button(
-        "Download Backup JSON",
-        data=backup_payload,
-        file_name=f"pulse-budget-backup-{date.today().isoformat()}.json",
-        mime="application/json",
-        use_container_width=True,
-    )
-    restore_file = st.file_uploader("Restore from backup file", type=["json"], key="restore_json_file")
-    if restore_file is not None:
-        if st.button("Restore Backup Now", use_container_width=True):
-            try:
-                restored_raw = json.load(restore_file)
-                restored_data = normalize_data(restored_raw)
-                save_data(restored_data, active_backend)
-                st.session_state["flash_success"] = "Backup restored successfully."
-                st.rerun()
-            except Exception:
-                st.error("Invalid backup file. Please upload a valid JSON export.")
+    st.markdown(f"**{t('target_settings')}**")
+    tc1, tc2, tc3 = st.columns(3)
+    with tc1:
+        tn = st.text_input(t("target_name"), value=str(tgt["name"]))
+    with tc2:
+        tt = st.number_input(t("target_total"), min_value=1.0,
+                             value=float(tgt["total"]), step=50.0)
+    with tc3:
+        tm = st.number_input(t("monthly_goal"), min_value=0.0,
+                             value=float(tgt["monthly_goal"]), step=25.0)
+    if st.button(t("save_target"), use_container_width=True):
+        data["target"]["name"] = tn.strip() or "My Goal"
+        data["target"]["total"] = round(float(tt), 2)
+        data["target"]["monthly_goal"] = round(float(tm), 2)
+        save_data(data)
+        st.session_state["flash_success"] = t("target_saved_msg")
+        st.rerun()
 
-with st.expander("Supabase Setup (Optional Cloud Sync)", expanded=False):
-    st.markdown(
-        '<div class="small-muted">If you deploy online, Supabase keeps data persistent across app restarts.</div>',
-        unsafe_allow_html=True,
-    )
-    st.code(
-        """create table if not exists app_state (
-  id text primary key,
-  payload jsonb not null,
-  updated_at timestamptz default now()
-);""",
-        language="sql",
-    )
-    st.code(
-        """# In Streamlit Cloud -> App settings -> Secrets
-[supabase]
-url = "https://YOUR_PROJECT.supabase.co"
-service_role_key = "YOUR_SERVICE_ROLE_KEY" """,
-        language="toml",
-    )
+# ── Log Expense ───────────────────────────────────────────────────────────
 
-col_a, col_b = st.columns(2, gap="small")
-with col_a:
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="metric-label">Safe to Spend Today</div>
-            <div class="metric-value">{format_money(safe_today)}</div>
-            <div class="metric-sub">{days_left} day(s) left in this week</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-with col_b:
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="metric-label">Burn Rate Check</div>
-            <div class="metric-value" style="font-size:1.18rem;">{burn_msg}</div>
-            <div class="metric-sub">Stay near your daily pace target</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+st.markdown(f'<div id="log" class="section-title">{t("log_expense")}</div>',
+            unsafe_allow_html=True)
 
-st.markdown(
-    f"""
-    <div class="card">
-        <div class="metric-label">Budget Remaining Progress</div>
-        <div class="progress-track"><div class="progress-fill" style="width:{progress_pct:.1f}%; background:{progress_color};"></div></div>
-        <div class="metric-sub">{progress_pct:.0f}% of weekly budget left</div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-if remaining < 0:
-    st.error(f"Panic Mode: You are {format_money(abs(remaining))} over budget.")
-
-st.markdown('<div id="quick-log-expense" class="section-title">Quick Log Expense</div>', unsafe_allow_html=True)
 with st.form("expense_form", clear_on_submit=True):
-    amount = st.number_input("Amount", min_value=0.0, step=1.0, format="%.2f")
-    category = st.selectbox("Category", CATEGORIES)
-    note = st.text_input("Optional note")
-    amortized = st.checkbox("Amortize this?")
-    submitted = st.form_submit_button("Add Expense", use_container_width=True)
+    amt = st.number_input(t("amount"), min_value=0.0, step=1.0, format="%.2f")
+    cat_label = st.selectbox(t("category"), cat_labels())
+    note = st.text_input(t("note"))
+    amor = st.checkbox(t("amortize"))
+    submitted = st.form_submit_button(t("add_btn"), use_container_width=True)
 
 if submitted:
-    if amount <= 0:
-        st.warning("Enter an amount greater than $0.")
+    if amt <= 0:
+        st.warning(t("enter_positive"))
     else:
-        charged = round(amount * 0.5, 2) if amortized else round(amount, 2)
-        transaction = {
+        charged = round(amt * 0.5, 2) if amor else round(amt, 2)
+        ck = cat_key_from_label(cat_label)
+        tx = {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "amount_entered": round(float(amount), 2),
+            "amount_entered": round(float(amt), 2),
             "amount_charged": charged,
-            "category": category,
+            "category_key": ck,
             "note": note.strip(),
-            "amortized": bool(amortized),
+            "amortized": bool(amor),
         }
-        data["transactions"].append(transaction)
+        data["transactions"].append(tx)
         data["remaining_balance"] = round(data["remaining_balance"] - charged, 2)
-        save_data(data, active_backend)
-
-        if amortized:
-            st.session_state["flash_success"] = (
-                f"Logged {format_money(amount)} in {category}. "
-                f"Only {format_money(charged)} counted this week. "
-                "Remember to log the other half next week."
-            )
+        save_data(data)
+        if amor:
+            st.session_state["flash_success"] = t("amortize_msg")
         else:
-            st.session_state["flash_success"] = f"Logged {format_money(charged)} in {category}."
+            st.session_state["flash_success"] = t("logged").format(v=fmt(charged), c=t(ck))
         st.rerun()
 
-
-quick_left, quick_right = st.columns(2, gap="small")
-with quick_left:
-    if st.button("Undo Last Transaction", use_container_width=True):
+u1, u2 = st.columns(2, gap="small")
+with u1:
+    if st.button(t("undo"), use_container_width=True):
         if data["transactions"]:
-            last_tx = data["transactions"].pop()
-            data["remaining_balance"] = round(data["remaining_balance"] + float(last_tx["amount_charged"]), 2)
-            save_data(data, active_backend)
-            st.session_state["flash_info"] = "Last transaction removed and balance restored."
+            ltx = data["transactions"].pop()
+            data["remaining_balance"] = round(
+                data["remaining_balance"] + float(ltx["amount_charged"]), 2)
+            save_data(data)
+            st.session_state["flash_info"] = t("undo_done")
             st.rerun()
         else:
-            st.warning("No transactions to undo.")
-
-with quick_right:
-    if st.button("Start New Week", use_container_width=True):
+            st.warning(t("no_undo"))
+with u2:
+    if st.button(t("new_week"), use_container_width=True):
         start_new_week(data, current_week_id())
-        save_data(data, active_backend)
-        st.session_state["flash_info"] = "Fresh week started. Your balance is reset."
+        save_data(data)
+        st.session_state["flash_info"] = t("new_week_done")
         st.rerun()
 
+# ── Category Insights ─────────────────────────────────────────────────────
 
-summary, total_spent = category_summary(data["transactions"])
-st.markdown('<div class="section-title">Where Your Money Is Going</div>', unsafe_allow_html=True)
+summary, total_spent = cat_summary(data["transactions"])
+st.markdown(f'<div class="section-title">{t("category_insights")}</div>',
+            unsafe_allow_html=True)
+
 if total_spent <= 0:
-    st.markdown(
-        """
-        <div class="card">
-            <div class="metric-sub">No spending logged yet this week. Add your first expense to unlock category insights.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div class="card"><div class="metric-sub">{t("no_spending")}</div></div>',
+                unsafe_allow_html=True)
 else:
     sorted_cats = sorted(summary.items(), key=lambda x: x[1], reverse=True)
     chart_rows = []
-    for cat, value in sorted_cats:
-        pct = (value / total_spent) * 100
-        chart_rows.append({"category": cat, "spent": value, "pct": pct})
-    chart_data = chart_rows
+    for ck, val in sorted_cats:
+        pct = (val / total_spent) * 100
+        chart_rows.append({"category": t(ck), "spent": val, "pct": pct})
 
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+    palette = ["#5eead4", "#38bdf8", "#a78bfa", "#fb7185",
+               "#fbbf24", "#34d399", "#94a3b8", "#64748b"]
+
     donut = (
-        alt.Chart(alt.Data(values=chart_data))
-        .mark_arc(innerRadius=58, outerRadius=92, cornerRadius=4)
+        alt.Chart(alt.Data(values=chart_rows))
+        .mark_arc(innerRadius=52, outerRadius=88, cornerRadius=3)
         .encode(
-            theta=alt.Theta("spent:Q"),
-            color=alt.Color(
-                "category:N",
-                scale=alt.Scale(
-                    range=[
-                        "#b1885b",
-                        "#c5a171",
-                        "#9d7e59",
-                        "#d1b28a",
-                        "#a58b69",
-                        "#b79b79",
-                        "#8f7355",
-                        "#c8b18f",
-                    ]
-                ),
-                legend=alt.Legend(
-                    orient="bottom",
-                    labelColor="#5f5347",
-                    title=None,
-                    columns=2,
-                    symbolType="circle",
-                ),
-            ),
-            tooltip=[
-                alt.Tooltip("category:N", title="Category"),
-                alt.Tooltip("spent:Q", title="Spent", format=",.2f"),
-                alt.Tooltip("pct:Q", title="Share", format=".1f"),
-            ],
+            theta=alt.Theta("spent:Q", stack=True),
+            color=alt.Color("category:N",
+                            scale=alt.Scale(range=palette),
+                            legend=alt.Legend(orient="bottom", columns=2,
+                                             labelColor="#cbd5e1",
+                                             symbolType="circle", title=None)),
+            tooltip=[alt.Tooltip("category:N", title=t("category")),
+                     alt.Tooltip("spent:Q", title="$", format=",.2f"),
+                     alt.Tooltip("pct:Q", title="%", format=".1f")],
         )
-        .properties(height=250)
+        .properties(height=240)
         .configure_view(strokeWidth=0)
         .configure(background="transparent")
     )
+    st.markdown('<div class="card">', unsafe_allow_html=True)
     st.altair_chart(donut, use_container_width=True)
-
-    for cat, value in sorted_cats:
-        pct = (value / total_spent) * 100
-        st.markdown(
-            f"""
-            <div class="bar-row">
-                <div class="bar-head"><span>{cat}</span><span>{format_money(value)} · {pct:.0f}%</span></div>
-                <div class="mini-track"><div class="mini-fill" style="width:{pct:.1f}%"></div></div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
     st.markdown("</div>", unsafe_allow_html=True)
 
-    top_cat, top_amount = sorted_cats[0]
-    top_pct = (top_amount / total_spent) * 100
-    st.markdown(
-        f"""
-        <div class="card">
-            <div class="metric-label">Top Spend Category</div>
-            <div class="metric-value" style="font-size:1.25rem;">{top_cat} ({top_pct:.0f}%)</div>
-            <div class="metric-sub">Your largest spend area this week is {top_cat.lower()}.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    for ck, val in sorted_cats:
+        pct = (val / total_spent) * 100
+        st.markdown(f"""
+        <div class="bar-row">
+          <div class="bar-head"><span>{t(ck)}</span><span>{fmt(val)} · {pct:.0f}%</span></div>
+          <div class="mini-track"><div class="mini-fill" style="width:{min(100, pct):.1f}%"></div></div>
+        </div>""", unsafe_allow_html=True)
 
-
-st.markdown(
-    f"""
+    top_k, top_v = sorted_cats[0]
+    top_p = int((top_v / total_spent) * 100)
+    st.markdown(f"""
     <div class="card">
-        <div class="metric-label">Weekly Snapshot</div>
-        <div class="metric-sub">Total spent: <strong>{format_money(total_spent)}</strong></div>
-        <div class="metric-sub">Remaining balance: <strong>{format_money(data["remaining_balance"])}</strong></div>
-        <div class="metric-sub">Transactions: <strong>{len(data["transactions"])}</strong></div>
-        <div class="metric-sub">Week: <strong>{data["current_week_id"]}</strong></div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+      <div class="metric-label">{t("insight")}</div>
+      <div class="metric-value" style="font-size:1.1rem">{t("top_spend").format(c=t(top_k), p=top_p)}</div>
+      <div class="metric-sub">{t("top_spend_sub").format(c=t(top_k))}</div>
+    </div>""", unsafe_allow_html=True)
 
+# ── Target Card ───────────────────────────────────────────────────────────
 
-st.markdown('<div class="section-title">Recent Transactions</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="section-title">{t("target_section")}</div>',
+            unsafe_allow_html=True)
+
+st.markdown(f"""
+<div class="card">
+  <div class="metric-label">🎯 {tgt["name"]}</div>
+  <div class="metric-value" style="font-size:1.65rem">{fmt(tgt_saved)} / {fmt(tgt_total)}</div>
+  <div class="metric-sub">{tgt_pct:.1f}% {t("completed")}</div>
+  <div class="progress-track" style="margin-top:.55rem">
+    <div class="progress-fill" style="width:{tgt_pct:.1f}%;background:linear-gradient(90deg,#5eead4,#38bdf8)"></div>
+  </div>
+</div>""", unsafe_allow_html=True)
+
+# Breakdown
+st.markdown(f"""
+<div class="card">
+  <div class="metric-sub" style="margin-bottom:.35rem">{t("breakdown_auto")}: <strong>{fmt(tgt_auto)}</strong></div>
+  <div class="metric-sub">{t("breakdown_extra")}: <strong>{fmt(tgt_extra)}</strong></div>
+  <div class="metric-sub" style="margin-top:.35rem;color:#e8eaef;font-size:.88rem"><strong>{t("breakdown_total")}: {fmt(tgt_saved)}</strong></div>
+</div>""", unsafe_allow_html=True)
+
+# Weekly contribution
+cw1, cw2 = st.columns(2)
+with cw1:
+    st.markdown(f"""
+    <div class="card">
+      <div class="metric-label">{t("projected_save")}</div>
+      <div class="metric-value" style="font-size:1.2rem">{fmt(proj_save)}</div>
+      <div class="metric-sub">{t("formula_save")}</div>
+    </div>""", unsafe_allow_html=True)
+with cw2:
+    st.markdown(f"""
+    <div class="card">
+      <div class="metric-label">{t("last_week_credit")}</div>
+      <div class="metric-value" style="font-size:1.2rem">{fmt(last_wk_save)}</div>
+      <div class="metric-sub">{t("auto_credit")}</div>
+    </div>""", unsafe_allow_html=True)
+
+# Week savings history table
+rows_md = []
+for row in data.get("weekly_savings_log", [])[-6:]:
+    rows_md.append(
+        f"| {row.get('week_id','')} | {fmt(float(row.get('budget',0)))} | "
+        f"{fmt(float(row.get('spent',0)))} | {fmt(float(row.get('saved',0)))} |")
+if rows_md:
+    st.markdown(
+        f"| {t('week_col')} | {t('budget_col')} | {t('spent_col')} | {t('saved_col')} |\n"
+        "| --- | --- | --- | --- |\n" + "\n".join(rows_md))
+
+# ── Extra Deposit ─────────────────────────────────────────────────────────
+
+st.markdown(f'<div class="section-title">{t("extra_deposit")}</div>',
+            unsafe_allow_html=True)
+st.markdown(f'<div class="metric-sub" style="margin-bottom:.5rem">{t("extra_deposit_desc")}</div>',
+            unsafe_allow_html=True)
+
+with st.form("deposit_form", clear_on_submit=True):
+    dep_amt = st.number_input(t("amount"), min_value=0.0, step=10.0,
+                              format="%.2f", key="dep_amt")
+    dep_note = st.text_input(t("extra_note"), key="dep_note")
+    dep_sub = st.form_submit_button(t("add_deposit"), use_container_width=True)
+
+if dep_sub:
+    if dep_amt <= 0:
+        st.warning(t("enter_positive"))
+    else:
+        dep_val = round(float(dep_amt), 2)
+        data["target"]["extra_total"] = round(tgt_extra + dep_val, 2)
+
+        data["extra_deposits"].append({
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "amount": dep_val,
+            "note": dep_note.strip(),
+        })
+        data["extra_deposits"] = data["extra_deposits"][-50:]
+
+        data["monthly_extra_deposits"][mk] = round(m_extra + dep_val, 2)
+        save_data(data)
+        st.session_state["flash_success"] = t("deposit_done").format(v=fmt(dep_val))
+        st.rerun()
+
+# ── Target Pace ───────────────────────────────────────────────────────────
+
+st.markdown(f'<div class="section-title">{t("target_pace")}</div>',
+            unsafe_allow_html=True)
+
+st.markdown(f"""
+<div class="card">
+  <div class="metric-label">{t("monthly_goal_label")}</div>
+  <div class="metric-value">{fmt(m_goal)}</div>
+  <div class="metric-sub" style="margin-top:.6rem">{t("month_auto")}: <strong>{fmt(m_auto)}</strong></div>
+  <div class="metric-sub">{t("month_extra")}: <strong>{fmt(m_extra)}</strong></div>
+  <div class="metric-sub">{t("month_total")}: <strong>{fmt(m_total)}</strong></div>
+  <div class="metric-sub" style="margin-top:.3rem">{t("pace_ratio_label")}: <strong>{pace_r:.2f}</strong></div>
+  <div class="metric-sub"><span class="{pace_cls}"><strong>{pace_lbl}</strong></span></div>
+  <div class="metric-sub" style="margin-top:.45rem">{t("pace_tip").format(n=tgt["name"])}</div>
+</div>""", unsafe_allow_html=True)
+
+# ── History ───────────────────────────────────────────────────────────────
+
+st.markdown(f'<div class="section-title">{t("history")}</div>',
+            unsafe_allow_html=True)
+
 recent = list(reversed(data["transactions"][-5:]))
 if not recent:
-    st.markdown(
-        """
-        <div class="card">
-            <div class="metric-sub">No transactions yet.</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown(f'<div class="card"><div class="metric-sub">{t("no_tx")}</div></div>',
+                unsafe_allow_html=True)
 else:
     for tx in recent:
-        stamp = tx.get("timestamp", "")
-        pretty_time = stamp.replace("T", " ")
-        amortized_text = "Amortized" if tx.get("amortized") else "Standard"
-        note = tx.get("note", "").strip()
-        note_html = f'<div class="tx-note">{note}</div>' if note else ""
-        st.markdown(
-            f"""
-            <div class="tx-item">
-                <div class="tx-top">
-                    <div class="tx-cat">{tx.get("category", "Other")}</div>
-                    <div class="tx-charge">{format_money(float(tx.get("amount_charged", 0)))}</div>
-                </div>
-                <div class="tx-meta">
-                    Entered: {format_money(float(tx.get("amount_entered", 0)))} · {amortized_text} · {pretty_time}
-                </div>
-                {note_html}
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-st.markdown(
-    """
-    <a class="floating-fab" href="#quick-log-expense">+ Quick Log</a>
-    """,
-    unsafe_allow_html=True,
-)
+        ts = tx.get("timestamp", "").replace("T", " ")
+        ck = tx.get("category_key", "cat_other")
+        amr = "Amortized" if tx.get("amortized") else "Standard"
+        n = tx.get("note", "").strip()
+        n_html = f'<div class="tx-note">{n}</div>' if n else ""
+        st.markdown(f"""
+        <div class="tx-item">
+          <div class="tx-top">
+            <div class="tx-cat">{t(ck)}</div>
+            <div class="tx-charge">{fmt(float(tx.get("amount_charged", 0)))}</div>
+          </div>
+          <div class="tx-meta">{ts} · {t("entered")} {fmt(float(tx.get("amount_entered", 0)))} · {amr}</div>
+          {n_html}
+        </div>""", unsafe_allow_html=True)
