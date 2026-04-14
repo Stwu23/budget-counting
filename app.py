@@ -121,6 +121,11 @@ LANG: dict[str, dict[str, str]] = {
         "cat_exists": "该分类已存在。",
         "cat_empty": "请输入分类名称。",
         "pace_saved": "月度目标已更新。",
+        "tx_deleted": "已删除该笔记录，余额已恢复。",
+        "tx_updated": "记录已更新。",
+        "edit_amount": "金额",
+        "edit_cat": "分类",
+        "edit_note": "备注",
     },
     "en": {
         "brand": "Pulse",
@@ -209,6 +214,11 @@ LANG: dict[str, dict[str, str]] = {
         "cat_exists": "This category already exists.",
         "cat_empty": "Enter a category name.",
         "pace_saved": "Monthly goal updated.",
+        "tx_deleted": "Transaction deleted, balance restored.",
+        "tx_updated": "Transaction updated.",
+        "edit_amount": "Amount",
+        "edit_cat": "Category",
+        "edit_note": "Note",
     },
 }
 
@@ -1001,30 +1011,103 @@ else:
     </div>""", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════
-# History
+# History — with per-item edit & delete
 # ══════════════════════════════════════════════════════════════════════════
 
 st.markdown(f'<div class="section-title">{t("history")}</div>',
             unsafe_allow_html=True)
 
-recent = list(reversed(data["transactions"][-5:]))
-if not recent:
+tx_list = data["transactions"]
+num_tx = len(tx_list)
+show_indices = list(range(max(0, num_tx - 5), num_tx))[::-1]
+
+if not show_indices:
     st.markdown(
         f'<div class="card"><div class="metric-sub">{t("no_tx")}</div></div>',
         unsafe_allow_html=True)
 else:
-    for tx in recent:
-        ts = tx.get("timestamp", "").replace("T", " ")
-        cat = tx_category(tx)
-        amr = "Amortized" if tx.get("amortized") else "Standard"
-        n = tx.get("note", "").strip()
-        n_html = f'<div class="tx-note">{n}</div>' if n else ""
-        st.markdown(f"""
-        <div class="tx-item">
-          <div class="tx-top">
-            <div class="tx-cat">{cat}</div>
-            <div class="tx-charge">{fmt(float(tx.get("amount_charged",0)))}</div>
-          </div>
-          <div class="tx-meta">{ts} · {t("entered")} {fmt(float(tx.get("amount_entered",0)))} · {amr}</div>
-          {n_html}
-        </div>""", unsafe_allow_html=True)
+    for idx in show_indices:
+        tx = tx_list[idx]
+        edit_key = f"_edit_tx_{idx}"
+
+        if st.session_state.get(edit_key, False):
+            # ── inline edit mode ──
+            st.markdown(f'<div class="card" style="padding:.85rem .9rem">',
+                        unsafe_allow_html=True)
+            st.markdown('</div>', unsafe_allow_html=True)
+
+            e_amt = st.number_input(
+                t("edit_amount"), min_value=0.01,
+                value=float(tx.get("amount_entered", 0)),
+                step=1.0, format="%.2f", key=f"eamt_{idx}")
+            e_cat = st.selectbox(
+                t("edit_cat"), cats,
+                index=cats.index(tx_category(tx)) if tx_category(tx) in cats else 0,
+                key=f"ecat_{idx}")
+            e_note = st.text_input(
+                t("edit_note"),
+                value=tx.get("note", ""), key=f"enote_{idx}")
+            e_amor = st.checkbox(
+                t("amortize"),
+                value=bool(tx.get("amortized", False)), key=f"eamor_{idx}")
+
+            s_col, c_col = st.columns(2, gap="small")
+            with s_col:
+                if st.button(t("save"), key=f"save_tx_{idx}",
+                             use_container_width=True):
+                    old_charged = float(tx.get("amount_charged", 0))
+                    new_charged = round(float(e_amt) * 0.5, 2) if e_amor \
+                        else round(float(e_amt), 2)
+
+                    data["remaining_balance"] = round(
+                        data["remaining_balance"] + old_charged - new_charged, 2)
+
+                    tx["amount_entered"] = round(float(e_amt), 2)
+                    tx["amount_charged"] = new_charged
+                    tx["category"] = e_cat
+                    tx.pop("category_key", None)
+                    tx["note"] = e_note.strip()
+                    tx["amortized"] = bool(e_amor)
+
+                    save_data(data)
+                    st.session_state[edit_key] = False
+                    st.session_state["flash_success"] = t("tx_updated")
+                    st.rerun()
+            with c_col:
+                if st.button(t("cancel"), key=f"cancel_tx_{idx}",
+                             use_container_width=True):
+                    st.session_state[edit_key] = False
+                    st.rerun()
+        else:
+            # ── display mode ──
+            ts = tx.get("timestamp", "").replace("T", " ")
+            cat = tx_category(tx)
+            amr = "Amortized" if tx.get("amortized") else "Standard"
+            n = tx.get("note", "").strip()
+            n_html = f'<div class="tx-note">{n}</div>' if n else ""
+            st.markdown(f"""
+            <div class="tx-item">
+              <div class="tx-top">
+                <div class="tx-cat">{cat}</div>
+                <div class="tx-charge">{fmt(float(tx.get("amount_charged",0)))}</div>
+              </div>
+              <div class="tx-meta">{ts} · {t("entered")} {fmt(float(tx.get("amount_entered",0)))} · {amr}</div>
+              {n_html}
+            </div>""", unsafe_allow_html=True)
+
+            act_l, act_r, act_pad = st.columns([1, 1, 4])
+            with act_l:
+                if st.button("✏️", key=f"editbtn_{idx}",
+                             use_container_width=True):
+                    st.session_state[edit_key] = True
+                    st.rerun()
+            with act_r:
+                if st.button("✕", key=f"delbtn_{idx}",
+                             use_container_width=True):
+                    removed = tx_list.pop(idx)
+                    data["remaining_balance"] = round(
+                        data["remaining_balance"]
+                        + float(removed.get("amount_charged", 0)), 2)
+                    save_data(data)
+                    st.session_state["flash_info"] = t("tx_deleted")
+                    st.rerun()
